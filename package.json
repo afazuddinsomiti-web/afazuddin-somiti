@@ -3,12 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "deploy": "wrangler d1 migrations apply afazuddin-somiti-db --remote && wrangler deploy",
+    "deploy": "wrangler deploy",
     "db:migrate": "wrangler d1 migrations apply afazuddin-somiti-db --remote",
-    "dev": "wrangler dev",
-    "build": ""
+    "dev": "wrangler dev"
   },
   "devDependencies": {
-    "wrangler": "^4.68.0"
+    "wrangler": "^4.135.0"
   }
 }
