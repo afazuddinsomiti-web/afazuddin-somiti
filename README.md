@@ -19,3 +19,4 @@ Cloudflare Worker + D1 management system for 50 members.
 - Binding: `DB`
 
 See `SETUP.md` for deployment and admin-secret setup.
+Cloudflare deployment trigger.
