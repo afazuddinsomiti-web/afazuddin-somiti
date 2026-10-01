@@ -1,0 +1,23 @@
+আফাজউদ্দীন সমবায় সমিতি ও সংগঠন — GitHub Upload
+
+এই folder-এর সব file/folder GitHub repository-র root-এ upload করবেন।
+
+Cloudflare Workers Builds:
+- Git account: afazuddinsomiti-web
+- Repository: afazuddin-somiti
+- Branch: main
+- Build command: blank
+- Deploy command: npm run deploy
+- Preview builds: OFF (প্রথম deployment-এর জন্য)
+- Root directory: blank / /
+
+Worker: falling-snow-05a0
+D1: afazuddin-somiti-db
+D1 ID: 40a6c98b-daa0-43c0-b232-b519a824930b
+Binding: DB
+
+প্রথম deployment-এর পরে Cloudflare Worker Settings > Variables & Secrets > Secrets-এ
+ADMIN_INITIAL_PASSWORD নামে একটি strong temporary password যোগ করবেন।
+Admin email: afazuddinsomiti@gmail.com
+
+প্রথম login-এর পর app নতুন password সেট করতে বলবে।

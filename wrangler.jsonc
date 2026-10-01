@@ -1,0 +1,19 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "falling-snow-05a0",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-30",
+  "keep_vars": true,
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "afazuddin-somiti-db",
+      "database_id": "40a6c98b-daa0-43c0-b232-b519a824930b"
+    }
+  ]
+}
