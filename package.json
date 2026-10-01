@@ -1,5 +1,13 @@
-"scripts": {
-  "deploy": "npm run db:migrations:apply && wrangler deploy",
-  "db:migrations:apply": "wrangler d1 migrations apply DB --remote",
-  "dev": "wrangler dev"
+{
+  "name": "afazuddin-somiti-cloudflare",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "npm run db:migrate && wrangler deploy",
+    "db:migrate": "wrangler d1 migrations apply DB --remote",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": "^4.135.0"
+  }
 }
