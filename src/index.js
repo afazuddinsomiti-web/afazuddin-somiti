@@ -75,13 +75,38 @@ async function ensureAdmin(env) {
 }
 
 async function ensureSeed(env) {
-  const row = await env.DB.prepare('SELECT COUNT(*) AS c FROM members').first();
-  if (Number(row?.c || 0) > 0) return;
+  const memberRows = await env.DB.prepare('SELECT member_no FROM members ORDER BY member_no').all();
+  const existing = new Set((memberRows.results || []).map(r => Number(r.member_no)));
   const shares = [5,6,10];
   const stmt = env.DB.prepare('INSERT INTO members(id,member_no,name,position,phone,shares,join_date) VALUES(?,?,?,?,?,?,?)');
   const batch = [];
-  for (let i=1;i<=50;i++) batch.push(stmt.bind(uid('m'),i,`সদস্য ${String(i).padStart(2,'0')}`,'','',shares[(i-1)%3],''));
-  await env.DB.batch(batch);
+  for (let i=1;i<=50;i++) {
+    if (!existing.has(i)) batch.push(stmt.bind(uid('m'),i,`সদস্য ${String(i).padStart(2,'0')}`,'','',shares[(i-1)%3],''));
+  }
+  if (batch.length) await env.DB.batch(batch);
+
+  const ruleCount = await env.DB.prepare('SELECT COUNT(*) AS c FROM rules').first();
+  if (Number(ruleCount?.c || 0) === 0) {
+    const ruleStmt = env.DB.prepare('INSERT INTO rules(id,title,body) VALUES(?,?,?)');
+    const rules = [
+      ['১. মাসিক চাঁদা','প্রতি Share-এর নির্ধারিত মাসিক চাঁদা সময়মতো পরিশোধ করতে হবে।'],
+      ['২. চাঁদা জমার সময়সীমা','প্রতি মাসের ১৫ তারিখের মধ্যে মাসিক চাঁদা জমা দেওয়ার চেষ্টা করতে হবে।'],
+      ['৩. বিলম্ব জরিমানা','১৫ তারিখের পর বকেয়া Share-এর জন্য নির্ধারিত জরিমানা প্রযোজ্য হবে।'],
+      ['৪. একাধিক Share','প্রত্যেক সদস্যের অনুমোদিত Share সংখ্যা অনুযায়ী মাসিক চাঁদা হিসাব করা হবে।'],
+      ['৫. সদস্যদের হিসাব','প্রত্যেক সদস্যের জমা, বকেয়া ও জরিমানার হিসাব অ্যাপে সংরক্ষণ করা হবে।'],
+      ['৬. সদস্য তথ্য পরিবর্তন','নাম, পদবি, মোবাইল ও Share-এর তথ্য পরিবর্তনের প্রয়োজন হলে Admin-এর মাধ্যমে আপডেট করতে হবে।'],
+      ['৭. তহবিলের ব্যবহার','সমিতির সাধারণ তহবিল সমিতির অনুমোদিত প্রয়োজন ও কার্যক্রমে ব্যবহার করা হবে।'],
+      ['৮. সাংগঠনিক ফান্ড','যাকাত, ফিতরা, স্বেচ্ছা দান, জরিমানা ও অন্যান্য সকল তহবিলের আয়-ব্যয়ের হিসাব আলাদা খাতে রাখা হবে।'],
+      ['৯. আয়-ব্যয়ের স্বচ্ছতা','সমিতির আয় ও ব্যয়ের হিসাব নিয়মিত সংরক্ষণ ও পর্যালোচনা করা হবে।'],
+      ['১০. সাংগঠনিক সিদ্ধান্ত','সমিতির গুরুত্বপূর্ণ সাংগঠনিক সিদ্ধান্ত আলোচনা ও সম্মতির ভিত্তিতে গ্রহণ করা হবে।'],
+      ['১১. সদস্যদের দায়িত্ব','প্রত্যেক সদস্যকে সমিতির নিয়ম মেনে চলতে এবং নির্ধারিত সময়ের মধ্যে নিজের দায়িত্ব পালন করতে হবে।'],
+      ['১২. শৃঙ্খলা','সমিতির সকল সদস্যকে পরস্পরের প্রতি সম্মানজনক আচরণ করতে হবে এবং অপ্রয়োজনীয় বিরোধ এড়িয়ে চলতে হবে।'],
+      ['১৩. হিসাব সংরক্ষণ','সমিতির হিসাব, লেনদেন ও প্রয়োজনীয় নথি নিরাপদভাবে সংরক্ষণ করা হবে।'],
+      ['১৪. নিয়ম পরিবর্তন','প্রয়োজন হলে Admin বা সমিতির অনুমোদিত সিদ্ধান্তের মাধ্যমে এই নিয়মগুলো সংশোধন বা নতুন নিয়ম যোগ করা যাবে।'],
+      ['১৫. মূলনীতি','একতায় শক্তি, ঐক্যেই সমাধান—পারস্পরিক সহযোগিতা ও বিশ্বাসের মাধ্যমে সমিতির কার্যক্রম পরিচালিত হবে।']
+    ];
+    await env.DB.batch(rules.map(([title,body]) => ruleStmt.bind(uid('rule'),title,body)));
+  }
 }
 
 async function state(env) {
@@ -89,6 +114,7 @@ async function state(env) {
     env.DB.prepare('SELECT id,member_no AS no,name,position,phone,shares,join_date AS joinDate FROM members WHERE active=1 ORDER BY member_no').all(),
     env.DB.prepare('SELECT id,member_id AS memberId,month,amount,payment_date AS date,notes FROM payments ORDER BY payment_date DESC').all(),
     env.DB.prepare("SELECT id,tx_date AS date,kind,amount,category,description,member_id AS memberId,month FROM fund_transactions ORDER BY tx_date DESC").all(),
+    env.DB.prepare("SELECT id,tx_date AS date,kind,category,amount,description FROM organizational_fund_transactions ORDER BY tx_date DESC").all(),
     env.DB.prepare("SELECT id,title,body,created_at AS createdAt,updated_at AS updatedAt FROM rules ORDER BY created_at DESC").all()
   ]);
   return {members:members.results||[],payments:payments.results||[],fund:fund.results||[],orgFund:orgFund.results||[],rules:rules.results||[],month:monthNow(),share:SHARE,finePerShare:FINE,cutoff:CUTOFF};
