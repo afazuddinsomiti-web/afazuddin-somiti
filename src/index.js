@@ -56,12 +56,16 @@ async function ensureSchema(env) {
     env.DB.prepare("CREATE TABLE IF NOT EXISTS admins (email TEXT PRIMARY KEY, password_hash TEXT NOT NULL, must_change_password INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, email TEXT NOT NULL, expires_at INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS audit_log (id TEXT PRIMARY KEY, email TEXT NOT NULL, action TEXT NOT NULL, entity TEXT DEFAULT '', entity_id TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
-    env.DB.prepare("CREATE TABLE IF NOT EXISTS organizational_fund_transactions (id TEXT PRIMARY KEY, tx_date TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('income','expense')), category TEXT NOT NULL, amount REAL NOT NULL, description TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS organizational_fund_transactions (id TEXT PRIMARY KEY, tx_date TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('income','expense')), category TEXT NOT NULL, amount REAL NOT NULL, donor_name TEXT DEFAULT '', description TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_payments_member_month ON payments(member_id, month)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_fund_date ON fund_transactions(tx_date)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_org_fund_date ON organizational_fund_transactions(tx_date)")
   ]);
+  const orgCols = await env.DB.prepare("PRAGMA table_info(organizational_fund_transactions)").all();
+  if (!(orgCols.results || []).some(c => c.name === 'donor_name')) {
+    await env.DB.prepare("ALTER TABLE organizational_fund_transactions ADD COLUMN donor_name TEXT DEFAULT ''").run();
+  }
 }
 
 async function ensureAdmin(env) {
@@ -121,7 +125,7 @@ async function state(env) {
     env.DB.prepare('SELECT id,member_no AS no,name,position,phone,shares,join_date AS joinDate FROM members WHERE active=1 ORDER BY member_no').all(),
     env.DB.prepare('SELECT id,member_id AS memberId,month,amount,payment_date AS date,notes FROM payments ORDER BY payment_date DESC').all(),
     env.DB.prepare("SELECT id,tx_date AS date,kind,amount,category,description,member_id AS memberId,month FROM fund_transactions ORDER BY tx_date DESC").all(),
-    env.DB.prepare("SELECT id,tx_date AS date,kind,category,amount,description FROM organizational_fund_transactions ORDER BY tx_date DESC").all(),
+    env.DB.prepare("SELECT id,tx_date AS date,kind,category,amount,donor_name AS donorName,description FROM organizational_fund_transactions ORDER BY tx_date DESC").all(),
     env.DB.prepare("SELECT id,title,body,created_at AS createdAt,updated_at AS updatedAt FROM rules ORDER BY created_at DESC").all()
   ]);
   return {members:members.results||[],payments:payments.results||[],fund:fund.results||[],orgFund:orgFund.results||[],rules:rules.results||[],month:monthNow(),share:SHARE,finePerShare:FINE,cutoff:CUTOFF};
@@ -174,6 +178,16 @@ async function route(req, env) {
     } catch(e) { return json({error:'Member number already exists or data is invalid'},400); }
     await audit(env,s.email,b.id?'update':'create','member',id); return json({ok:true,id});
   }
+  if (url.pathname.startsWith('/api/members/') && req.method === 'DELETE') {
+    const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
+    const id=url.pathname.split('/').pop();
+    const member=await env.DB.prepare('SELECT id,name FROM members WHERE id=? AND active=1').bind(id).first();
+    if(!member) return json({error:'Member not found'},404);
+    // Soft-delete so old payments and financial history remain intact.
+    await env.DB.prepare('UPDATE members SET active=0,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(id).run();
+    await audit(env,s.email,'deactivate','member',id);
+    return json({ok:true,id});
+  }
   if (url.pathname === '/api/payments' && req.method === 'POST') {
     const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
     const b=await req.json().catch(()=>({}));
@@ -216,9 +230,11 @@ async function route(req, env) {
     const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
     const b=await req.json().catch(()=>({})); const amount=Number(b.amount);
     const categories=['যাকাত','ফিতরা','স্বেচ্ছা দান','জরিমানা','অন্যান্য'];
+    const donorName=String(b.donorName||'').trim();
     if(!/^\d{4}-\d{2}-\d{2}$/.test(b.date)||!Number.isFinite(amount)||amount<=0||!['income','expense'].includes(b.kind)||!categories.includes(String(b.category||''))) return json({error:'Invalid organizational fund transaction'},400);
+    if(b.kind==='income' && !donorName) return json({error:'জমাদাতার নাম দিন।'},400);
     const id=uid('of');
-    await env.DB.prepare('INSERT INTO organizational_fund_transactions(id,tx_date,kind,category,amount,description) VALUES(?,?,?,?,?,?)').bind(id,b.date,b.kind,String(b.category),amount,String(b.description||'').trim()).run();
+    await env.DB.prepare('INSERT INTO organizational_fund_transactions(id,tx_date,kind,category,amount,donor_name,description) VALUES(?,?,?,?,?,?,?)').bind(id,b.date,b.kind,String(b.category),amount,donorName,String(b.description||'').trim()).run();
     await audit(env,s.email,'create','organizational_fund',id); return json({ok:true,id});
   }
   if (url.pathname.startsWith('/api/org-fund/') && req.method === 'DELETE') {
