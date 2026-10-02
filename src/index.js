@@ -68,10 +68,18 @@ async function ensureSchema(env) {
 async function ensureAdmin(env) {
   const email = String(env.ADMIN_EMAIL || ADMIN_EMAIL_DEFAULT).trim().toLowerCase();
   const existing = await env.DB.prepare('SELECT email FROM admins WHERE email=?').bind(email).first();
-  if (existing) return;
-  if (!env.ADMIN_INITIAL_PASSWORD) throw new Error('ADMIN_INITIAL_PASSWORD secret is not configured');
+  if (existing) return true;
+
+  // Never block the public site just because the optional initial-password
+  // secret is missing. If the admin account does not exist yet, login will
+  // return a clear configuration error instead of a generic Server error.
+  if (!env.ADMIN_INITIAL_PASSWORD) return false;
+
   const password_hash = await hashPassword(env.ADMIN_INITIAL_PASSWORD);
-  await env.DB.prepare('INSERT INTO admins(email,password_hash,must_change_password) VALUES(?,?,1)').bind(email,password_hash).run();
+  await env.DB.prepare(
+    'INSERT INTO admins(email,password_hash,must_change_password) VALUES(?,?,1)'
+  ).bind(email,password_hash).run();
+  return true;
 }
 
 async function ensureSeed(env) {
@@ -138,7 +146,8 @@ async function route(req, env) {
     const email = String(body.email||'').trim().toLowerCase();
     const password = String(body.password||'');
     const admin = await env.DB.prepare('SELECT email,password_hash,must_change_password AS mustChangePassword FROM admins WHERE lower(email)=?').bind(email).first();
-    if (!admin || !(await verifyPassword(password,admin.password_hash))) return json({error:'Invalid email or password'},401);
+    if (!admin) return json({error:'Admin account is not configured. Cloudflare Worker-এ ADMIN_INITIAL_PASSWORD secret সেট করুন।'},503);
+    if (!(await verifyPassword(password,admin.password_hash))) return json({error:'Invalid email or password'},401);
     const token = `${crypto.randomUUID()}-${crypto.randomUUID()}`;
     await env.DB.prepare('INSERT INTO sessions(token_hash,email,expires_at) VALUES(?,?,?)').bind(await sha256(token),admin.email,Date.now()+SESSION_DAYS*86400000).run();
     await audit(env,admin.email,'login');
