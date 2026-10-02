@@ -1,0 +1,20 @@
+{
+  "name": "আফাজউদ্দীন সমবায় সমিতি ও সংগঠন",
+  "short_name": "আফাজউদ্দীন সমিতি",
+  "description": "আফাজউদ্দীন সমবায় সমিতি ও সংগঠনের সদস্য, মাসিক জমা, Fund ও Reports ব্যবস্থাপনা",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f8f7",
+  "theme_color": "#0b6b55",
+  "lang": "bn",
+  "icons": [
+    {"src":"/icons/icon-48.png","sizes":"48x48","type":"image/png"},
+    {"src":"/icons/icon-72.png","sizes":"72x72","type":"image/png"},
+    {"src":"/icons/icon-96.png","sizes":"96x96","type":"image/png"},
+    {"src":"/icons/icon-144.png","sizes":"144x144","type":"image/png"},
+    {"src":"/icons/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},
+    {"src":"/icons/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any"},
+    {"src":"/icons/icon-maskable-512.png","sizes":"512x512","type":"image/png","purpose":"maskable"}
+  ]
+}
