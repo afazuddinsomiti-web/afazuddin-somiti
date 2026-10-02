@@ -1,0 +1,8 @@
+পরবর্তী কাজ:
+1) এই ZIP extract করুন।
+2) Repository root-এ migrations, public, src এবং root config files replace করুন।
+3) main branch-এ commit করুন।
+4) Cloudflare Workers Builds connected থাকলে main push-এর পর automatic build/deploy হবে।
+5) Cloudflare build সফল হলে live Worker URL খুলে test করুন।
+
+নোট: ZIP ফাইলটি নিজে repository-তে upload করবেন না। ZIP-এর ভেতরের files/folders repository root-এ upload/replace করবেন।
