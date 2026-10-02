@@ -121,14 +121,15 @@ async function ensureSeed(env) {
 }
 
 async function state(env) {
-  const [members, payments, fund, orgFund, rules] = await Promise.all([
+  const [members, cancelledMembers, payments, fund, orgFund, rules] = await Promise.all([
     env.DB.prepare('SELECT id,member_no AS no,name,position,phone,shares,join_date AS joinDate FROM members WHERE active=1 ORDER BY member_no').all(),
+    env.DB.prepare('SELECT id,member_no AS no,name,position,phone,shares,join_date AS joinDate,updated_at AS cancelledAt FROM members WHERE active=0 ORDER BY member_no').all(),
     env.DB.prepare('SELECT id,member_id AS memberId,month,amount,payment_date AS date,notes FROM payments ORDER BY payment_date DESC').all(),
     env.DB.prepare("SELECT id,tx_date AS date,kind,amount,category,description,member_id AS memberId,month FROM fund_transactions ORDER BY tx_date DESC").all(),
     env.DB.prepare("SELECT id,tx_date AS date,kind,category,amount,donor_name AS donorName,description FROM organizational_fund_transactions ORDER BY tx_date DESC").all(),
     env.DB.prepare("SELECT id,title,body,created_at AS createdAt,updated_at AS updatedAt FROM rules ORDER BY created_at DESC").all()
   ]);
-  return {members:members.results||[],payments:payments.results||[],fund:fund.results||[],orgFund:orgFund.results||[],rules:rules.results||[],month:monthNow(),share:SHARE,finePerShare:FINE,cutoff:CUTOFF};
+  return {members:members.results||[],cancelledMembers:cancelledMembers.results||[],payments:payments.results||[],fund:fund.results||[],orgFund:orgFund.results||[],rules:rules.results||[],month:monthNow(),share:SHARE,finePerShare:FINE,cutoff:CUTOFF};
 }
 
 async function route(req, env) {
@@ -186,6 +187,15 @@ async function route(req, env) {
     // Soft-delete so old payments and financial history remain intact.
     await env.DB.prepare('UPDATE members SET active=0,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(id).run();
     await audit(env,s.email,'deactivate','member',id);
+    return json({ok:true,id});
+  }
+  if (url.pathname.startsWith('/api/members/') && url.pathname.endsWith('/restore') && req.method === 'POST') {
+    const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
+    const id=url.pathname.split('/').slice(-2,-1)[0];
+    const member=await env.DB.prepare('SELECT id,name FROM members WHERE id=? AND active=0').bind(id).first();
+    if(!member) return json({error:'Cancelled member not found'},404);
+    await env.DB.prepare('UPDATE members SET active=1,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(id).run();
+    await audit(env,s.email,'restore','member',id);
     return json({ok:true,id});
   }
   if (url.pathname === '/api/payments' && req.method === 'POST') {
