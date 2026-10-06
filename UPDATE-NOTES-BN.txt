@@ -24,3 +24,13 @@ APK নতুন করে বানানোর প্রয়োজন নেই
 20. Dashboard ও Committee page-এ তিনটি section আলাদা করে দেখানো হয়।
 21. Bangla/English visible UI text আরও consistent করা হয়েছে এবং Dashboard subtitle “সব গুরুত্বপূর্ণ তথ্য এক জায়গায়—সহজ, পরিষ্কার ও সুন্দরভাবে।” সরানো হয়েছে।
 22. নতুন migration: `0004_committee_members.sql`; existing migrations ও existing data রাখা হয়েছে।
+
+--- Dashboard & Manual Payment Update ---
+- Dashboard-এর নিচের embedded committee member list সরানো হয়েছে। Committee box-এ click করলে পুরো Committee page খুলবে।
+- Dashboard-এর Member box-এ click করলে পুরো Members page খুলবে।
+- Dashboard-এর পুরোনো amount KPI cards সরানো হয়েছে।
+- Dashboard এখন শুধু current month-এর manual payment entries থেকে Due/Paid/Pending/Fine auto হিসাব দেখাবে।
+- Monthly Deposit form-এ payment amount এখন সম্পূর্ণ manual input; system আর বাকি amount নিজে থেকে Amount field-এ বসাবে না।
+- Month + Member + actual received amount + payment date + notes সংরক্ষণ করা যাবে।
+- Existing payment/member/fund/report database structure অপরিবর্তিত রাখা হয়েছে।
+- Mobile photo upload-এর payload আরও ছোট ও phone-friendly করা হয়েছে (member ও committee photo উভয়ের জন্য)।
