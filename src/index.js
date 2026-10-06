@@ -4,6 +4,8 @@ const ADMIN_EMAIL_DEFAULT = 'afazuddinsomiti@gmail.com';
 const SHARE = 500;
 const FINE = 50;
 const CUTOFF = 15;
+const START_MONTH = '2025-10';
+const START_DATE = '2025-10-01';
 
 function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
@@ -126,13 +128,13 @@ async function state(env) {
   const [members, cancelledMembers, payments, fund, orgFund, rules, committee] = await Promise.all([
     env.DB.prepare('SELECT id,member_no AS no,name,position,phone,shares,profile_photo AS photo,join_date AS joinDate FROM members WHERE active=1 ORDER BY member_no').all(),
     env.DB.prepare('SELECT id,member_no AS no,name,position,phone,shares,profile_photo AS photo,join_date AS joinDate,updated_at AS cancelledAt FROM members WHERE active=0 ORDER BY member_no').all(),
-    env.DB.prepare('SELECT id,member_id AS memberId,month,amount,payment_date AS date,notes FROM payments ORDER BY payment_date DESC').all(),
-    env.DB.prepare("SELECT id,tx_date AS date,kind,amount,category,description,member_id AS memberId,month FROM fund_transactions ORDER BY tx_date DESC").all(),
-    env.DB.prepare("SELECT id,tx_date AS date,kind,category,amount,donor_name AS donorName,description FROM organizational_fund_transactions ORDER BY tx_date DESC").all(),
+    env.DB.prepare('SELECT id,member_id AS memberId,month,amount,payment_date AS date,notes FROM payments WHERE month>=? ORDER BY payment_date DESC').bind(START_MONTH).all(),
+    env.DB.prepare("SELECT id,tx_date AS date,kind,amount,category,description,member_id AS memberId,month FROM fund_transactions WHERE tx_date>=? ORDER BY tx_date DESC").bind(START_DATE).all(),
+    env.DB.prepare("SELECT id,tx_date AS date,kind,category,amount,donor_name AS donorName,description FROM organizational_fund_transactions WHERE tx_date>=? ORDER BY tx_date DESC").bind(START_DATE).all(),
     env.DB.prepare("SELECT id,title,body,created_at AS createdAt,updated_at AS updatedAt FROM rules ORDER BY created_at DESC").all(),
     env.DB.prepare("SELECT id,name,designation,section,photo,sort_order AS sortOrder,created_at AS createdAt,updated_at AS updatedAt FROM committee_members ORDER BY CASE section WHEN 'board' THEN 1 WHEN 'executive' THEN 2 WHEN 'advisory' THEN 3 ELSE 4 END, sort_order, created_at").all()
   ]);
-  return {members:members.results||[],cancelledMembers:cancelledMembers.results||[],payments:payments.results||[],fund:fund.results||[],orgFund:orgFund.results||[],rules:rules.results||[],committee:committee.results||[],month:monthNow(),share:SHARE,finePerShare:FINE,cutoff:CUTOFF};
+  return {members:members.results||[],cancelledMembers:cancelledMembers.results||[],payments:payments.results||[],fund:fund.results||[],orgFund:orgFund.results||[],rules:rules.results||[],committee:committee.results||[],month:monthNow(),share:SHARE,finePerShare:FINE,cutoff:CUTOFF,startMonth:START_MONTH,startDate:START_DATE};
 }
 
 async function route(req, env) {
@@ -177,7 +179,7 @@ async function route(req, env) {
     const no=Number(b.no), shares=Number(b.shares);
     if(!Number.isInteger(no)||no<1||!b.name||!validShares(shares)) return json({error:'Invalid member data'},400);
     const photo=typeof b.photo==='string'?b.photo:'';
-    if(photo.length>700000) return json({error:'Profile photo is too large. Please choose a smaller image.'},400);
+    if(photo.length>120000) return json({error:'Profile photo is too large. Please choose a smaller image.'},400);
     try {
       if(b.id) await env.DB.prepare('UPDATE members SET member_no=?,name=?,position=?,phone=?,shares=?,profile_photo=?,join_date=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(no,String(b.name).trim(),b.position||'',b.phone||'',shares,photo,b.join||'',id).run();
       else await env.DB.prepare('INSERT INTO members(id,member_no,name,position,phone,shares,profile_photo,join_date) VALUES(?,?,?,?,?,?,?,?)').bind(id,no,String(b.name).trim(),b.position||'',b.phone||'',shares,photo,b.join||'').run();
@@ -231,7 +233,7 @@ async function route(req, env) {
     const photo=typeof b.photo==='string'?b.photo:'';
     const sortOrder=Number.isInteger(Number(b.sortOrder)) ? Number(b.sortOrder) : 0;
     if(!name||!designation||!['board','executive','advisory'].includes(section)) return json({error:'Invalid committee member data'},400);
-    if(photo.length>700000) return json({error:'Committee photo is too large. Please choose a smaller image.'},400);
+    if(photo.length>120000) return json({error:'Committee photo is too large. Please choose a smaller image.'},400);
     if(b.id) {
       const existing=await env.DB.prepare('SELECT id FROM committee_members WHERE id=?').bind(id).first();
       if(!existing) return json({error:'Committee member not found'},404);
@@ -256,7 +258,7 @@ async function route(req, env) {
     const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
     const b=await req.json().catch(()=>({}));
     const amount=Number(b.amount);
-    if(!b.memberId||!/^\d{4}-\d{2}$/.test(b.month)||!Number.isFinite(amount)||amount<=0||!/^\d{4}-\d{2}-\d{2}$/.test(b.date)) return json({error:'Invalid payment'},400);
+    if(!b.memberId||!/^\d{4}-\d{2}$/.test(b.month)||String(b.month)<START_MONTH||!Number.isFinite(amount)||amount<=0||!/^\d{4}-\d{2}-\d{2}$/.test(b.date)||String(b.date)<START_DATE) return json({error:'Invalid payment'},400);
     const member=await env.DB.prepare('SELECT shares FROM members WHERE id=? AND active=1').bind(b.memberId).first();
     if(!member) return json({error:'Member not found'},404);
     const id=uid('p');
@@ -282,7 +284,7 @@ async function route(req, env) {
   if (url.pathname === '/api/fund' && req.method === 'POST') {
     const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
     const b=await req.json().catch(()=>({})); const amount=Number(b.amount);
-    if(!/^\d{4}-\d{2}-\d{2}$/.test(b.date)||!Number.isFinite(amount)||amount<=0||!['income','investment','expense'].includes(b.kind)) return json({error:'Invalid fund transaction'},400);
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(b.date)||String(b.date)<START_DATE||!Number.isFinite(amount)||amount<=0||!['income','investment','expense'].includes(b.kind)) return json({error:'Invalid fund transaction'},400);
     const id=uid('f'); await env.DB.prepare('INSERT INTO fund_transactions(id,tx_date,kind,amount,category,description,member_id,month) VALUES(?,?,?,?,?,?,?,?)').bind(id,b.date,b.kind,amount,b.category||'',b.description||'',b.memberId||null,b.month||null).run();
     await audit(env,s.email,'create','fund',id); return json({ok:true,id});
   }
@@ -295,7 +297,7 @@ async function route(req, env) {
     const b=await req.json().catch(()=>({})); const amount=Number(b.amount);
     const categories=['যাকাত','ফিতরা','স্বেচ্ছা দান','জরিমানা','অন্যান্য'];
     const donorName=String(b.donorName||'').trim();
-    if(!/^\d{4}-\d{2}-\d{2}$/.test(b.date)||!Number.isFinite(amount)||amount<=0||!['income','expense'].includes(b.kind)||!categories.includes(String(b.category||''))) return json({error:'Invalid organizational fund transaction'},400);
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(b.date)||String(b.date)<START_DATE||!Number.isFinite(amount)||amount<=0||!['income','expense'].includes(b.kind)||!categories.includes(String(b.category||''))) return json({error:'Invalid organizational fund transaction'},400);
     if(b.kind==='income' && !donorName) return json({error:'জমাদাতার নাম দিন।'},400);
     const id=uid('of');
     await env.DB.prepare('INSERT INTO organizational_fund_transactions(id,tx_date,kind,category,amount,donor_name,description) VALUES(?,?,?,?,?,?,?)').bind(id,b.date,b.kind,String(b.category),amount,donorName,String(b.description||'').trim()).run();

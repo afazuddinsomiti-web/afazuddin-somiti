@@ -1,11 +1,9 @@
-এই আপডেটে শুধু চাওয়া সমস্যাগুলো ঠিক করা হয়েছে।
-
-- সদস্যের ক্রমিক নম্বর ১ থেকে ধারাবাহিক করার Admin action যোগ করা হয়েছে; member ID ও পুরোনো payment history অক্ষত থাকে।
-- বিদ্যমান dashboard summary (বর্তমান মাস / গত ৩ মাস / শুরু থেকে বর্তমান) ফিরিয়ে আনা হয়েছে।
-- dashboard action icon HTML-এ একবারই রাখা হয়েছে, ফলে double icon আর হবে না।
-- মাসিক Share payment ও জরিমানা payment আলাদা manual entry হিসেবে রাখা হয়েছে।
-- জরিমানা আর automatic নয়; Admin নিজে জরিমানার টাকা entry করলে dashboard/report-এ তা যোগ হবে।
-- mobile photo upload আরও ছোট payload, camera/gallery support এবং robust image decoding দিয়ে ঠিক করা হয়েছে।
-- existing D1 migrations পরিবর্তন বা মুছে ফেলা হয়নি।
-- existing member/payment/fund/report/rules/admin functionality অক্ষত রাখা হয়েছে।
-- accidental extra script0.js ZIP থেকে বাদ দেওয়া হয়েছে।
+এই আপডেটে শুধুমাত্র অনুরোধ করা সংশোধন করা হয়েছে:
+- মোবাইলে কমিটি Edit/Delete button ছোট ও thumb-friendly করা
+- Member/Committee photo upload-এ mobile-safe FileReader + Canvas fallback, ছোট JPEG payload এবং save-before-preview protection
+- Dashboard-এর Committee/Organization Fund/Reports icon একই inline SVG-তে আনা; icon double হওয়ার সমস্যা দূর
+- Dashboard-এর ৪টি colorful action box-এ icon-এর পাশে নাম দেখানো
+- Dashboard-এ বর্তমান মাস, গত ৩ মাস এবং অক্টোবর ২০২৫ থেকে বর্তমান পর্যন্ত payment summary পুনঃস্থাপন
+- সব হিসাবের accounting start point ২০২৫-১০-০১; এর আগের payment/fund/org-fund records calculation/API display থেকে বাদ
+- ২০২৫-১০-০১-এর আগের নতুন accounting entry server-side block করা
+- Existing D1 migrations, member IDs, payment IDs ও stored data delete/alter করা হয়নি।
