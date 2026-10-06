@@ -121,15 +121,16 @@ async function ensureSeed(env) {
 }
 
 async function state(env) {
-  const [members, cancelledMembers, payments, fund, orgFund, rules] = await Promise.all([
+  const [members, cancelledMembers, payments, fund, orgFund, rules, committee] = await Promise.all([
     env.DB.prepare('SELECT id,member_no AS no,name,position,phone,shares,profile_photo AS photo,join_date AS joinDate FROM members WHERE active=1 ORDER BY member_no').all(),
     env.DB.prepare('SELECT id,member_no AS no,name,position,phone,shares,profile_photo AS photo,join_date AS joinDate,updated_at AS cancelledAt FROM members WHERE active=0 ORDER BY member_no').all(),
     env.DB.prepare('SELECT id,member_id AS memberId,month,amount,payment_date AS date,notes FROM payments ORDER BY payment_date DESC').all(),
     env.DB.prepare("SELECT id,tx_date AS date,kind,amount,category,description,member_id AS memberId,month FROM fund_transactions ORDER BY tx_date DESC").all(),
     env.DB.prepare("SELECT id,tx_date AS date,kind,category,amount,donor_name AS donorName,description FROM organizational_fund_transactions ORDER BY tx_date DESC").all(),
-    env.DB.prepare("SELECT id,title,body,created_at AS createdAt,updated_at AS updatedAt FROM rules ORDER BY created_at DESC").all()
+    env.DB.prepare("SELECT id,title,body,created_at AS createdAt,updated_at AS updatedAt FROM rules ORDER BY created_at DESC").all(),
+    env.DB.prepare("SELECT id,name,designation,section,photo,sort_order AS sortOrder,created_at AS createdAt,updated_at AS updatedAt FROM committee_members ORDER BY CASE section WHEN 'board' THEN 1 WHEN 'executive' THEN 2 WHEN 'advisory' THEN 3 ELSE 4 END, sort_order, created_at").all()
   ]);
-  return {members:members.results||[],cancelledMembers:cancelledMembers.results||[],payments:payments.results||[],fund:fund.results||[],orgFund:orgFund.results||[],rules:rules.results||[],month:monthNow(),share:SHARE,finePerShare:FINE,cutoff:CUTOFF};
+  return {members:members.results||[],cancelledMembers:cancelledMembers.results||[],payments:payments.results||[],fund:fund.results||[],orgFund:orgFund.results||[],rules:rules.results||[],committee:committee.results||[],month:monthNow(),share:SHARE,finePerShare:FINE,cutoff:CUTOFF};
 }
 
 async function route(req, env) {
@@ -200,6 +201,37 @@ async function route(req, env) {
     await audit(env,s.email,'restore','member',id);
     return json({ok:true,id});
   }
+  if (url.pathname === '/api/committee' && req.method === 'POST') {
+    const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
+    const b=await req.json().catch(()=>({}));
+    const id=b.id||uid('committee');
+    const name=String(b.name||'').trim();
+    const designation=String(b.designation||'').trim();
+    const section=String(b.section||'').trim();
+    const photo=typeof b.photo==='string'?b.photo:'';
+    const sortOrder=Number.isInteger(Number(b.sortOrder)) ? Number(b.sortOrder) : 0;
+    if(!name||!designation||!['board','executive','advisory'].includes(section)) return json({error:'Invalid committee member data'},400);
+    if(photo.length>700000) return json({error:'Committee photo is too large. Please choose a smaller image.'},400);
+    if(b.id) {
+      const existing=await env.DB.prepare('SELECT id FROM committee_members WHERE id=?').bind(id).first();
+      if(!existing) return json({error:'Committee member not found'},404);
+      await env.DB.prepare('UPDATE committee_members SET name=?,designation=?,section=?,photo=?,sort_order=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(name,designation,section,photo,sortOrder,id).run();
+    } else {
+      await env.DB.prepare('INSERT INTO committee_members(id,name,designation,section,photo,sort_order) VALUES(?,?,?,?,?,?)').bind(id,name,designation,section,photo,sortOrder).run();
+    }
+    await audit(env,s.email,b.id?'update':'create','committee',id);
+    return json({ok:true,id});
+  }
+  if (url.pathname.startsWith('/api/committee/') && req.method === 'DELETE') {
+    const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
+    const id=url.pathname.split('/').pop();
+    const existing=await env.DB.prepare('SELECT id FROM committee_members WHERE id=?').bind(id).first();
+    if(!existing) return json({error:'Committee member not found'},404);
+    await env.DB.prepare('DELETE FROM committee_members WHERE id=?').bind(id).run();
+    await audit(env,s.email,'delete','committee',id);
+    return json({ok:true,id});
+  }
+
   if (url.pathname === '/api/payments' && req.method === 'POST') {
     const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
     const b=await req.json().catch(()=>({}));

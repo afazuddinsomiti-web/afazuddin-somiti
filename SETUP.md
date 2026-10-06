@@ -17,7 +17,13 @@ The API is designed for:
 - POST `/api/change-password`
 - POST `/api/members`
 - POST `/api/payments`
+- POST `/api/committee`
+- DELETE `/api/committee/:id`
 - POST `/api/fund`
 - DELETE `/api/fund/:id`
 
 Public routes only expose read data. Mutating routes require a valid server-side session.
+
+
+## Committee
+The committee directory is stored in the `committee_members` D1 table. It has three sections: `board`, `executive`, and `advisory`. Committee photos are compressed in the browser and stored with the committee record, so they remain available after refresh. Committee mutations require the existing server-side admin session.

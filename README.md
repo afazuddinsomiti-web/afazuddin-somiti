@@ -12,7 +12,7 @@ Final mobile-first public-view / admin-management app for **আফাজউদ�
 - ৳50/share late fine after the 15th for unpaid shares (display/calculation policy)
 - Dashboard: Total Collection, Total Pending, Total Should Be, Total Fine, Fund Balance
 - Fund Summary: Current Month / Last 3 Months / Lifetime
-- Members, Monthly Collection, Fund, Reports, and **সমিতির রুলস** pages
+- Members, Monthly Collection, Fund, Reports, **Committee**, and **সমিতির রুলস** pages
 - Mobile-first responsive UI
 - User-supplied logo used as header branding and PWA/app icon
 - PWA manifest and installable icon sizes
@@ -21,6 +21,7 @@ Final mobile-first public-view / admin-management app for **আফাজউদ�
 - Admin initial password loaded from `ADMIN_INITIAL_PASSWORD` Worker Secret
 - Audit log
 - D1 migration for flexible share counts
+- Dedicated editable committee directory with Board / Executive / Advisory sections and photo storage in D1
 
 ## Cloudflare resources
 
@@ -40,7 +41,7 @@ Deploy command:
 npx wrangler deploy
 ```
 
-Database migration command (only when needed for a new migration):
+Database migration command (run after adding a new migration, before/with the production deployment):
 
 ```text
 npx wrangler d1 migrations apply afazuddin-somiti-db --remote
