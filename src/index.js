@@ -29,7 +29,7 @@ function cookie(name, value, maxAge) {
 function todayISO(){ return new Date().toISOString().slice(0,10); }
 function monthNow(){ return todayISO().slice(0,7); }
 function isLate(date){ return Number(String(date).slice(8,10)) > CUTOFF; }
-function validShares(x){ return [5,6,10].includes(Number(x)); }
+function validShares(x){ const n=Number(x); return Number.isInteger(n) && n>=0 && n<=10; }
 
 async function session(req, env) {
   const raw = req.headers.get('Cookie') || '';
@@ -50,7 +50,7 @@ async function ensureSchema(env) {
   // rules. Using IF NOT EXISTS keeps existing data intact.
   await env.DB.batch([
     env.DB.prepare("CREATE TABLE IF NOT EXISTS rules (id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
-    env.DB.prepare("CREATE TABLE IF NOT EXISTS members (id TEXT PRIMARY KEY, member_no INTEGER NOT NULL UNIQUE, name TEXT NOT NULL, position TEXT DEFAULT '', phone TEXT DEFAULT '', shares INTEGER NOT NULL CHECK (shares IN (5,6,10)), join_date TEXT DEFAULT '', active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS members (id TEXT PRIMARY KEY, member_no INTEGER NOT NULL UNIQUE, name TEXT NOT NULL, position TEXT DEFAULT '', phone TEXT DEFAULT '', shares INTEGER NOT NULL CHECK (shares >= 0 AND shares <= 10), profile_photo TEXT DEFAULT '', join_date TEXT DEFAULT '', active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS payments (id TEXT PRIMARY KEY, member_id TEXT NOT NULL, month TEXT NOT NULL, amount REAL NOT NULL, payment_date TEXT NOT NULL, notes TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(member_id) REFERENCES members(id) ON DELETE CASCADE)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS fund_transactions (id TEXT PRIMARY KEY, tx_date TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('income','investment','expense')), amount REAL NOT NULL, category TEXT DEFAULT '', description TEXT DEFAULT '', member_id TEXT, month TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(member_id) REFERENCES members(id) ON DELETE SET NULL)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS admins (email TEXT PRIMARY KEY, password_hash TEXT NOT NULL, must_change_password INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
@@ -89,10 +89,10 @@ async function ensureSeed(env) {
   const memberRows = await env.DB.prepare('SELECT member_no FROM members ORDER BY member_no').all();
   const existing = new Set((memberRows.results || []).map(r => Number(r.member_no)));
   const shares = [5,6,10];
-  const stmt = env.DB.prepare('INSERT INTO members(id,member_no,name,position,phone,shares,join_date) VALUES(?,?,?,?,?,?,?)');
+  const stmt = env.DB.prepare('INSERT INTO members(id,member_no,name,position,phone,shares,profile_photo,join_date) VALUES(?,?,?,?,?,?,?,?)');
   const batch = [];
   for (let i=1;i<=50;i++) {
-    if (!existing.has(i)) batch.push(stmt.bind(uid('m'),i,`সদস্য ${String(i).padStart(2,'0')}`,'','',shares[(i-1)%3],''));
+    if (!existing.has(i)) batch.push(stmt.bind(uid('m'),i,`সদস্য ${String(i).padStart(2,'0')}`,'','',shares[(i-1)%3],'',''));
   }
   if (batch.length) await env.DB.batch(batch);
 
@@ -122,8 +122,8 @@ async function ensureSeed(env) {
 
 async function state(env) {
   const [members, cancelledMembers, payments, fund, orgFund, rules] = await Promise.all([
-    env.DB.prepare('SELECT id,member_no AS no,name,position,phone,shares,join_date AS joinDate FROM members WHERE active=1 ORDER BY member_no').all(),
-    env.DB.prepare('SELECT id,member_no AS no,name,position,phone,shares,join_date AS joinDate,updated_at AS cancelledAt FROM members WHERE active=0 ORDER BY member_no').all(),
+    env.DB.prepare('SELECT id,member_no AS no,name,position,phone,shares,profile_photo AS photo,join_date AS joinDate FROM members WHERE active=1 ORDER BY member_no').all(),
+    env.DB.prepare('SELECT id,member_no AS no,name,position,phone,shares,profile_photo AS photo,join_date AS joinDate,updated_at AS cancelledAt FROM members WHERE active=0 ORDER BY member_no').all(),
     env.DB.prepare('SELECT id,member_id AS memberId,month,amount,payment_date AS date,notes FROM payments ORDER BY payment_date DESC').all(),
     env.DB.prepare("SELECT id,tx_date AS date,kind,amount,category,description,member_id AS memberId,month FROM fund_transactions ORDER BY tx_date DESC").all(),
     env.DB.prepare("SELECT id,tx_date AS date,kind,category,amount,donor_name AS donorName,description FROM organizational_fund_transactions ORDER BY tx_date DESC").all(),
@@ -173,9 +173,11 @@ async function route(req, env) {
     const b=await req.json().catch(()=>({})); const id=b.id||uid('m');
     const no=Number(b.no), shares=Number(b.shares);
     if(!Number.isInteger(no)||no<1||!b.name||!validShares(shares)) return json({error:'Invalid member data'},400);
+    const photo=typeof b.photo==='string'?b.photo:'';
+    if(photo.length>700000) return json({error:'Profile photo is too large. Please choose a smaller image.'},400);
     try {
-      if(b.id) await env.DB.prepare('UPDATE members SET member_no=?,name=?,position=?,phone=?,shares=?,join_date=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(no,String(b.name).trim(),b.position||'',b.phone||'',shares,b.join||'',id).run();
-      else await env.DB.prepare('INSERT INTO members(id,member_no,name,position,phone,shares,join_date) VALUES(?,?,?,?,?,?,?)').bind(id,no,String(b.name).trim(),b.position||'',b.phone||'',shares,b.join||'').run();
+      if(b.id) await env.DB.prepare('UPDATE members SET member_no=?,name=?,position=?,phone=?,shares=?,profile_photo=?,join_date=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(no,String(b.name).trim(),b.position||'',b.phone||'',shares,photo,b.join||'',id).run();
+      else await env.DB.prepare('INSERT INTO members(id,member_no,name,position,phone,shares,profile_photo,join_date) VALUES(?,?,?,?,?,?,?,?)').bind(id,no,String(b.name).trim(),b.position||'',b.phone||'',shares,photo,b.join||'').run();
     } catch(e) { return json({error:'Member number already exists or data is invalid'},400); }
     await audit(env,s.email,b.id?'update':'create','member',id); return json({ok:true,id});
   }

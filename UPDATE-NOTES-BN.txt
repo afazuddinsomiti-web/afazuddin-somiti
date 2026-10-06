@@ -1,0 +1,16 @@
+আফাজউদ্দীন সমিতি — আপডেট নোট
+
+এই ভার্সনে:
+1. সদস্যের Share সংখ্যা 0 থেকে 10 পর্যন্ত করা হয়েছে।
+2. Member profile photo upload করার option যোগ করা হয়েছে।
+3. Profile photo ছোট করে সংরক্ষণ করা হয় যাতে অপ্রয়োজনীয় বড় ফাইল না যায়।
+4. Dashboard-এর নিচের member list এবং member-wise monthly table সরানো হয়েছে।
+5. Dashboard-এ colourful navigation cards যোগ করা হয়েছে।
+6. নতুন “কমিটি” বিভাগ যোগ করা হয়েছে; যেসব সদস্যের পদবি আছে তারা এখানে নাম + পদবি সহ দেখাবে। Committee card-এ Share দেখানো হয় না।
+7. “সাংগঠনিক ফান্ড” নামের পরিবর্তে “সংগঠন ফান্ড” ব্যবহার করা হয়েছে।
+8. D1 migration 0003 যোগ করা হয়েছে; existing member data রেখে 0-10 share range এবং profile_photo field যোগ করে।
+9. Existing payment, fund, rules, admin login এবং report functionality অকারণে সরানো হয়নি।
+10. Original project ZIP পরিবর্তন করা হয়নি; এই ZIP হলো updated working copy।
+
+ডিপ্লয় করার আগে D1 migration apply করতে হবে।
+APK নতুন করে বানানোর প্রয়োজন নেই, কারণ Android wrapper live Cloudflare Worker URL খোলে—website update হলে একই APK নতুন website দেখাবে।
