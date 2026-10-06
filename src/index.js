@@ -86,15 +86,17 @@ async function ensureAdmin(env) {
 }
 
 async function ensureSeed(env) {
-  const memberRows = await env.DB.prepare('SELECT member_no FROM members ORDER BY member_no').all();
-  const existing = new Set((memberRows.results || []).map(r => Number(r.member_no)));
-  const shares = [5,6,10];
-  const stmt = env.DB.prepare('INSERT INTO members(id,member_no,name,position,phone,shares,profile_photo,join_date) VALUES(?,?,?,?,?,?,?,?)');
-  const batch = [];
-  for (let i=1;i<=50;i++) {
-    if (!existing.has(i)) batch.push(stmt.bind(uid('m'),i,`সদস্য ${String(i).padStart(2,'0')}`,'','',shares[(i-1)%3],'',''));
+  // Seed demo members only when the database is completely empty. Never fill
+  // missing serial numbers in an existing database: doing so can create
+  // unwanted members and can overwrite the user's intended numbering.
+  const memberCount = await env.DB.prepare('SELECT COUNT(*) AS c FROM members').first();
+  if (Number(memberCount?.c || 0) === 0) {
+    const shares = [5,6,10];
+    const stmt = env.DB.prepare('INSERT INTO members(id,member_no,name,position,phone,shares,profile_photo,join_date) VALUES(?,?,?,?,?,?,?,?)');
+    const batch = [];
+    for (let i=1;i<=50;i++) batch.push(stmt.bind(uid('m'),i,`সদস্য ${String(i).padStart(2,'0')}`,'','',shares[(i-1)%3],'',''));
+    await env.DB.batch(batch);
   }
-  if (batch.length) await env.DB.batch(batch);
 
   const ruleCount = await env.DB.prepare('SELECT COUNT(*) AS c FROM rules').first();
   if (Number(ruleCount?.c || 0) === 0) {
@@ -182,6 +184,24 @@ async function route(req, env) {
     } catch(e) { return json({error:'Member number already exists or data is invalid'},400); }
     await audit(env,s.email,b.id?'update':'create','member',id); return json({ok:true,id});
   }
+  if (url.pathname === '/api/members/renumber' && req.method === 'POST') {
+    const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
+    const active=await env.DB.prepare('SELECT id FROM members WHERE active=1 ORDER BY member_no,id').all();
+    const cancelled=await env.DB.prepare('SELECT id FROM members WHERE active=0 ORDER BY member_no,id').all();
+    const activeRows=active.results||[], cancelledRows=cancelled.results||[];
+    const all=[...activeRows,...cancelledRows];
+    // Use negative temporary values first so SQLite's UNIQUE constraint cannot
+    // collide while we move existing numbers to 1..N.
+    const temp=all.map((r,i)=>env.DB.prepare('UPDATE members SET member_no=? WHERE id=?').bind(-(i+1),r.id));
+    const final=[];
+    activeRows.forEach((r,i)=>final.push(env.DB.prepare('UPDATE members SET member_no=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(i+1,r.id)));
+    cancelledRows.forEach((r,i)=>final.push(env.DB.prepare('UPDATE members SET member_no=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(activeRows.length+i+1,r.id)));
+    if(temp.length) await env.DB.batch(temp);
+    if(final.length) await env.DB.batch(final);
+    await audit(env,s.email,'renumber','members','active-and-cancelled');
+    return json({ok:true,active:activeRows.length,cancelled:cancelledRows.length});
+  }
+
   if (url.pathname.startsWith('/api/members/') && req.method === 'DELETE') {
     const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
     const id=url.pathname.split('/').pop();

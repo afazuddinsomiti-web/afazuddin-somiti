@@ -1,36 +1,11 @@
-আফাজউদ্দীন সমিতি — আপডেট নোট
+এই আপডেটে শুধু চাওয়া সমস্যাগুলো ঠিক করা হয়েছে।
 
-এই ভার্সনে:
-1. সদস্যের Share সংখ্যা 0 থেকে 10 পর্যন্ত করা হয়েছে।
-2. Member profile photo upload করার option যোগ করা হয়েছে।
-3. Profile photo ছোট করে সংরক্ষণ করা হয় যাতে অপ্রয়োজনীয় বড় ফাইল না যায়।
-4. Dashboard-এর নিচের member list এবং member-wise monthly table সরানো হয়েছে।
-5. Dashboard-এ colourful navigation cards যোগ করা হয়েছে।
-6. নতুন “কমিটি” বিভাগ যোগ করা হয়েছে; যেসব সদস্যের পদবি আছে তারা এখানে নাম + পদবি সহ দেখাবে। Committee card-এ Share দেখানো হয় না।
-7. “সাংগঠনিক ফান্ড” নামের পরিবর্তে “সংগঠন ফান্ড” ব্যবহার করা হয়েছে।
-8. D1 migration 0003 যোগ করা হয়েছে; existing member data রেখে 0-10 share range এবং profile_photo field যোগ করে।
-9. Existing payment, fund, rules, admin login এবং report functionality অকারণে সরানো হয়নি।
-10. Original project ZIP পরিবর্তন করা হয়নি; এই ZIP হলো updated working copy।
-
-ডিপ্লয় করার আগে D1 migration apply করতে হবে।
-APK নতুন করে বানানোর প্রয়োজন নেই, কারণ Android wrapper live Cloudflare Worker URL খোলে—website update হলে একই APK নতুন website দেখাবে।
-
-
-এই আপডেটে আরও যোগ হয়েছে:
-16. কমিটি এখন আলাদা editable D1 table-এ সংরক্ষিত।
-17. পরিচালনা পরিষদ, কার্যনির্বাহী পরিষদ ও উপদেষ্টা পরিষদ—৩টি section যোগ করা হয়েছে।
-18. Admin committee member add/edit/delete, designation/section change এবং photo upload/change করতে পারবেন।
-19. Committee photo D1-তে compressed data হিসেবে সংরক্ষণ করা হয় এবং refresh-এর পরও থাকে।
-20. Dashboard ও Committee page-এ তিনটি section আলাদা করে দেখানো হয়।
-21. Bangla/English visible UI text আরও consistent করা হয়েছে এবং Dashboard subtitle “সব গুরুত্বপূর্ণ তথ্য এক জায়গায়—সহজ, পরিষ্কার ও সুন্দরভাবে।” সরানো হয়েছে।
-22. নতুন migration: `0004_committee_members.sql`; existing migrations ও existing data রাখা হয়েছে।
-
---- Dashboard & Manual Payment Update ---
-- Dashboard-এর নিচের embedded committee member list সরানো হয়েছে। Committee box-এ click করলে পুরো Committee page খুলবে।
-- Dashboard-এর Member box-এ click করলে পুরো Members page খুলবে।
-- Dashboard-এর পুরোনো amount KPI cards সরানো হয়েছে।
-- Dashboard এখন শুধু current month-এর manual payment entries থেকে Due/Paid/Pending/Fine auto হিসাব দেখাবে।
-- Monthly Deposit form-এ payment amount এখন সম্পূর্ণ manual input; system আর বাকি amount নিজে থেকে Amount field-এ বসাবে না।
-- Month + Member + actual received amount + payment date + notes সংরক্ষণ করা যাবে।
-- Existing payment/member/fund/report database structure অপরিবর্তিত রাখা হয়েছে।
-- Mobile photo upload-এর payload আরও ছোট ও phone-friendly করা হয়েছে (member ও committee photo উভয়ের জন্য)।
+- সদস্যের ক্রমিক নম্বর ১ থেকে ধারাবাহিক করার Admin action যোগ করা হয়েছে; member ID ও পুরোনো payment history অক্ষত থাকে।
+- বিদ্যমান dashboard summary (বর্তমান মাস / গত ৩ মাস / শুরু থেকে বর্তমান) ফিরিয়ে আনা হয়েছে।
+- dashboard action icon HTML-এ একবারই রাখা হয়েছে, ফলে double icon আর হবে না।
+- মাসিক Share payment ও জরিমানা payment আলাদা manual entry হিসেবে রাখা হয়েছে।
+- জরিমানা আর automatic নয়; Admin নিজে জরিমানার টাকা entry করলে dashboard/report-এ তা যোগ হবে।
+- mobile photo upload আরও ছোট payload, camera/gallery support এবং robust image decoding দিয়ে ঠিক করা হয়েছে।
+- existing D1 migrations পরিবর্তন বা মুছে ফেলা হয়নি।
+- existing member/payment/fund/report/rules/admin functionality অক্ষত রাখা হয়েছে।
+- accidental extra script0.js ZIP থেকে বাদ দেওয়া হয়েছে।
