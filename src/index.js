@@ -59,6 +59,7 @@ async function ensureSchema(env) {
     env.DB.prepare("CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, email TEXT NOT NULL, expires_at INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS audit_log (id TEXT PRIMARY KEY, email TEXT NOT NULL, action TEXT NOT NULL, entity TEXT DEFAULT '', entity_id TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS organizational_fund_transactions (id TEXT PRIMARY KEY, tx_date TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('income','expense')), category TEXT NOT NULL, amount REAL NOT NULL, donor_name TEXT DEFAULT '', description TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS collector_settings (id TEXT PRIMARY KEY, name TEXT DEFAULT '', position TEXT DEFAULT '', phone TEXT DEFAULT '', bkash TEXT DEFAULT '', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_payments_member_month ON payments(member_id, month)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_fund_date ON fund_transactions(tx_date)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at)"),
@@ -129,16 +130,17 @@ async function ensureSeed(env) {
 }
 
 async function state(env) {
-  const [members, cancelledMembers, payments, fund, orgFund, rules, committee] = await Promise.all([
+  const [members, cancelledMembers, payments, fund, orgFund, rules, committee, collector] = await Promise.all([
     env.DB.prepare('SELECT id,member_no AS no,name,position,phone,shares,profile_photo AS photo,join_date AS joinDate FROM members WHERE active=1 ORDER BY member_no').all(),
     env.DB.prepare('SELECT id,member_no AS no,name,position,phone,shares,profile_photo AS photo,join_date AS joinDate,updated_at AS cancelledAt FROM members WHERE active=0 ORDER BY member_no').all(),
     env.DB.prepare('SELECT id,member_id AS memberId,month,amount,payment_date AS date,notes FROM payments WHERE month>=? ORDER BY payment_date DESC').bind(START_MONTH).all(),
     env.DB.prepare("SELECT id,tx_date AS date,kind,amount,category,description,member_id AS memberId,month FROM fund_transactions WHERE tx_date>=? ORDER BY tx_date DESC").bind(START_DATE).all(),
     env.DB.prepare("SELECT id,tx_date AS date,kind,category,amount,donor_name AS donorName,description FROM organizational_fund_transactions WHERE tx_date>=? ORDER BY tx_date DESC").bind(START_DATE).all(),
     env.DB.prepare("SELECT id,title,body,created_at AS createdAt,updated_at AS updatedAt FROM rules ORDER BY created_at DESC").all(),
-    env.DB.prepare("SELECT id,name,designation,section,photo,sort_order AS sortOrder,created_at AS createdAt,updated_at AS updatedAt FROM committee_members WHERE section='board' ORDER BY sort_order, created_at").all()
+    env.DB.prepare("SELECT id,name,designation,section,photo,sort_order AS sortOrder,created_at AS createdAt,updated_at AS updatedAt FROM committee_members WHERE section='board' ORDER BY sort_order, created_at").all(),
+    env.DB.prepare("SELECT id,name,position,phone,bkash FROM collector_settings WHERE id='main' LIMIT 1").first()
   ]);
-  return {members:members.results||[],cancelledMembers:cancelledMembers.results||[],payments:payments.results||[],fund:fund.results||[],orgFund:orgFund.results||[],rules:rules.results||[],committee:committee.results||[],month:monthNow(),share:SHARE,finePerShare:FINE,cutoff:CUTOFF,startMonth:START_MONTH,startDate:START_DATE};
+  return {members:members.results||[],cancelledMembers:cancelledMembers.results||[],payments:payments.results||[],fund:fund.results||[],orgFund:orgFund.results||[],rules:rules.results||[],committee:committee.results||[],collector:collector||{},month:monthNow(),share:SHARE,finePerShare:FINE,cutoff:CUTOFF,startMonth:START_MONTH,startDate:START_DATE};
 }
 
 async function route(req, env) {
@@ -301,6 +303,24 @@ async function route(req, env) {
       }
     }
     await audit(env,s.email,'update','payment',id); return json({ok:true,id});
+  }
+  if (url.pathname.startsWith('/api/payments/') && req.method === 'DELETE') {
+    const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
+    const id=url.pathname.split('/').pop();
+    const existing=await env.DB.prepare('SELECT id FROM payments WHERE id=?').bind(id).first();
+    if(!existing) return json({error:'Payment not found'},404);
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM fund_transactions WHERE payment_id=?').bind(id),
+      env.DB.prepare('DELETE FROM payments WHERE id=?').bind(id)
+    ]);
+    await audit(env,s.email,'delete','payment',id); return json({ok:true,id});
+  }
+  if (url.pathname === '/api/collector' && req.method === 'POST') {
+    const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
+    const b=await req.json().catch(()=>({}));
+    const name=String(b.name||'').trim(), position=String(b.position||'').trim(), phone=String(b.phone||'').trim(), bkash=String(b.bkash||'').trim();
+    await env.DB.prepare("INSERT INTO collector_settings(id,name,position,phone,bkash,updated_at) VALUES('main',?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET name=excluded.name,position=excluded.position,phone=excluded.phone,bkash=excluded.bkash,updated_at=CURRENT_TIMESTAMP").bind(name,position,phone,bkash).run();
+    await audit(env,s.email,'update','collector','main'); return json({ok:true});
   }
   if (url.pathname === '/api/rules' && req.method === 'POST') {
     const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
