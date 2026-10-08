@@ -282,37 +282,33 @@ async function route(req, env) {
     const b=await req.json().catch(()=>({}));
     const month=String(b.month||existing.month), date=String(b.date||existing.date), amount=Number(b.amount);
     if(!/^\d{4}-\d{2}$/.test(month)||month<START_MONTH||!/^\d{4}-\d{2}-\d{2}$/.test(date)||date<START_DATE||!Number.isFinite(amount)||amount<=0) return json({error:'Invalid payment'},400);
+    const notes=String(b.notes??existing.notes??'');
     const fund=await env.DB.prepare('SELECT id FROM fund_transactions WHERE payment_id=? LIMIT 1').bind(id).first();
-    if(fund){
-      await env.DB.batch([
-        env.DB.prepare('UPDATE payments SET month=?,amount=?,payment_date=?,notes=? WHERE id=?').bind(month,amount,date,String(b.notes??existing.notes??''),id),
-        env.DB.prepare("UPDATE fund_transactions SET tx_date=?,amount=?,member_id=?,month=?,description=? WHERE id=?").bind(date,amount,existing.memberId,month,'Member Payment '+id,fund.id)
-      ]);
-    }else{
-      const legacy=await env.DB.prepare("SELECT id FROM fund_transactions WHERE member_id=? AND month=? AND category='Member Payment' AND amount=? AND tx_date=? ORDER BY created_at DESC LIMIT 1").bind(existing.memberId,existing.month,existing.amount,existing.date).first();
-      if(legacy){
-        await env.DB.batch([
-          env.DB.prepare('UPDATE payments SET month=?,amount=?,payment_date=?,notes=? WHERE id=?').bind(month,amount,date,String(b.notes??existing.notes??''),id),
-          env.DB.prepare("UPDATE fund_transactions SET tx_date=?,amount=?,member_id=?,month=?,description=?,payment_id=? WHERE id=?").bind(date,amount,existing.memberId,month,'Member Payment '+id,id,legacy.id)
-        ]);
+    const legacy=fund?null:await env.DB.prepare("SELECT id FROM fund_transactions WHERE member_id=? AND month=? AND category='Member Payment' AND amount=? AND tx_date=? ORDER BY created_at DESC LIMIT 1").bind(existing.memberId,existing.month,existing.amount,existing.date).first();
+    try{
+      await env.DB.prepare('UPDATE payments SET month=?,amount=?,payment_date=?,notes=? WHERE id=?').bind(month,amount,date,notes,id).run();
+      if(fund){
+        await env.DB.prepare("UPDATE fund_transactions SET tx_date=?,amount=?,member_id=?,month=?,description=? WHERE id=?").bind(date,amount,existing.memberId,month,'Member Payment '+id,fund.id).run();
+      }else if(legacy){
+        await env.DB.prepare("UPDATE fund_transactions SET tx_date=?,amount=?,member_id=?,month=?,description=?,payment_id=? WHERE id=?").bind(date,amount,existing.memberId,month,'Member Payment '+id,id,legacy.id).run();
       }else{
-        await env.DB.batch([
-          env.DB.prepare('UPDATE payments SET month=?,amount=?,payment_date=?,notes=? WHERE id=?').bind(month,amount,date,String(b.notes??existing.notes??''),id),
-          env.DB.prepare('INSERT INTO fund_transactions(id,tx_date,kind,amount,category,description,member_id,month,payment_id) VALUES(?,?,?,?,?,?,?,?,?)').bind(uid('f'),date,'income',amount,'Member Payment','Member Payment '+id,existing.memberId,month,id)
-        ]);
+        await env.DB.prepare('INSERT INTO fund_transactions(id,tx_date,kind,amount,category,description,member_id,month,payment_id) VALUES(?,?,?,?,?,?,?,?,?)').bind(uid('f'),date,'income',amount,'Member Payment','Member Payment '+id,existing.memberId,month,id).run();
       }
-    }
+    }catch(e){ return json({error:'Payment update failed: '+String(e?.message||e)},500); }
     await audit(env,s.email,'update','payment',id); return json({ok:true,id});
   }
   if (url.pathname.startsWith('/api/payments/') && req.method === 'DELETE') {
     const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
     const id=url.pathname.split('/').pop();
-    const existing=await env.DB.prepare('SELECT id FROM payments WHERE id=?').bind(id).first();
+    const existing=await env.DB.prepare('SELECT id,member_id AS memberId,month,amount,payment_date AS date FROM payments WHERE id=?').bind(id).first();
     if(!existing) return json({error:'Payment not found'},404);
-    await env.DB.batch([
-      env.DB.prepare('DELETE FROM fund_transactions WHERE payment_id=?').bind(id),
-      env.DB.prepare('DELETE FROM payments WHERE id=?').bind(id)
-    ]);
+    const fund=await env.DB.prepare('SELECT id FROM fund_transactions WHERE payment_id=? LIMIT 1').bind(id).first();
+    const legacy=fund?null:await env.DB.prepare("SELECT id FROM fund_transactions WHERE member_id=? AND month=? AND category='Member Payment' AND amount=? AND tx_date=? ORDER BY created_at DESC LIMIT 1").bind(existing.memberId,existing.month,existing.amount,existing.date).first();
+    try{
+      if(fund) await env.DB.prepare('DELETE FROM fund_transactions WHERE id=?').bind(fund.id).run();
+      else if(legacy) await env.DB.prepare('DELETE FROM fund_transactions WHERE id=?').bind(legacy.id).run();
+      await env.DB.prepare('DELETE FROM payments WHERE id=?').bind(id).run();
+    }catch(e){ return json({error:'Payment delete failed: '+String(e?.message||e)},500); }
     await audit(env,s.email,'delete','payment',id); return json({ok:true,id});
   }
   if (url.pathname === '/api/collector' && req.method === 'POST') {
