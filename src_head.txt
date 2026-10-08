@@ -69,16 +69,6 @@ async function ensureSchema(env) {
   if (!(orgCols.results || []).some(c => c.name === 'donor_name')) {
     await env.DB.prepare("ALTER TABLE organizational_fund_transactions ADD COLUMN donor_name TEXT DEFAULT ''").run();
   }
-  const orgCols2 = await env.DB.prepare("PRAGMA table_info(organizational_fund_transactions)").all();
-  if (!(orgCols2.results || []).some(c => c.name === 'member_id')) await env.DB.prepare("ALTER TABLE organizational_fund_transactions ADD COLUMN member_id TEXT DEFAULT ''").run();
-  if (!(orgCols2.results || []).some(c => c.name === 'month')) await env.DB.prepare("ALTER TABLE organizational_fund_transactions ADD COLUMN month TEXT DEFAULT ''").run();
-  // Backfill fine records created before member/month fields were added.
-  const oldFines = await env.DB.prepare("SELECT id,donor_name AS donorName,description FROM organizational_fund_transactions WHERE category='জরিমানা' AND (member_id IS NULL OR member_id='' OR month IS NULL OR month='')").all();
-  for (const f of (oldFines.results || [])) {
-    const mo=String(f.description||'').match(/(20\d{2}-\d{2})/i)?.[1] || '';
-    const m=await env.DB.prepare('SELECT id FROM members WHERE name=? LIMIT 1').bind(String(f.donorName||'')).first();
-    if (m || mo) await env.DB.prepare("UPDATE organizational_fund_transactions SET member_id=COALESCE(NULLIF(member_id,''),?), month=COALESCE(NULLIF(month,''),?) WHERE id=?").bind(m?.id||'',mo,f.id).run();
-  }
   const fundCols = await env.DB.prepare("PRAGMA table_info(fund_transactions)").all();
   if (!(fundCols.results || []).some(c => c.name === 'payment_id')) {
     await env.DB.prepare("ALTER TABLE fund_transactions ADD COLUMN payment_id TEXT DEFAULT ''").run();
@@ -139,15 +129,15 @@ async function ensureSeed(env) {
   }
 }
 
-async function state(env, lite=false) {
+async function state(env) {
   const [members, cancelledMembers, payments, fund, orgFund, rules, committee, collector] = await Promise.all([
-    env.DB.prepare(lite ? "SELECT id,member_no AS no,name,position,phone,shares,'' AS photo,join_date AS joinDate FROM members WHERE active=1 ORDER BY member_no" : 'SELECT id,member_no AS no,name,position,phone,shares,profile_photo AS photo,join_date AS joinDate FROM members WHERE active=1 ORDER BY member_no').all(),
-    env.DB.prepare(lite ? "SELECT id,member_no AS no,name,position,phone,shares,'' AS photo,join_date AS joinDate,updated_at AS cancelledAt FROM members WHERE active=0 ORDER BY member_no" : 'SELECT id,member_no AS no,name,position,phone,shares,profile_photo AS photo,join_date AS joinDate,updated_at AS cancelledAt FROM members WHERE active=0 ORDER BY member_no').all(),
+    env.DB.prepare('SELECT id,member_no AS no,name,position,phone,shares,profile_photo AS photo,join_date AS joinDate FROM members WHERE active=1 ORDER BY member_no').all(),
+    env.DB.prepare('SELECT id,member_no AS no,name,position,phone,shares,profile_photo AS photo,join_date AS joinDate,updated_at AS cancelledAt FROM members WHERE active=0 ORDER BY member_no').all(),
     env.DB.prepare('SELECT id,member_id AS memberId,month,amount,payment_date AS date,notes FROM payments WHERE month>=? ORDER BY payment_date DESC').bind(START_MONTH).all(),
     env.DB.prepare("SELECT id,tx_date AS date,kind,amount,category,description,member_id AS memberId,month FROM fund_transactions WHERE tx_date>=? ORDER BY tx_date DESC").bind(START_DATE).all(),
-    env.DB.prepare("SELECT id,tx_date AS date,kind,category,amount,donor_name AS donorName,description,member_id AS memberId,month FROM organizational_fund_transactions WHERE tx_date>=? UNION ALL SELECT 'legacy-fine-'||id AS id,tx_date AS date,kind,category,amount,'Member' AS donorName,description,member_id AS memberId,month FROM fund_transactions WHERE tx_date>=? AND kind='income' AND category='জরিমানা' ORDER BY date DESC").bind(START_DATE,START_DATE).all(),
+    env.DB.prepare("SELECT id,tx_date AS date,kind,category,amount,donor_name AS donorName,description FROM organizational_fund_transactions WHERE tx_date>=? UNION ALL SELECT 'legacy-fine-'||id AS id,tx_date AS date,kind,category,amount,'Member' AS donorName,description FROM fund_transactions WHERE tx_date>=? AND kind='income' AND category='জরিমানা' ORDER BY date DESC").bind(START_DATE,START_DATE).all(),
     env.DB.prepare("SELECT id,title,body,created_at AS createdAt,updated_at AS updatedAt FROM rules ORDER BY created_at DESC").all(),
-    env.DB.prepare(lite ? "SELECT id,name,designation,section,'' AS photo,sort_order AS sortOrder,created_at AS createdAt,updated_at AS updatedAt FROM committee_members WHERE section='board' ORDER BY sort_order, created_at" : "SELECT id,name,designation,section,photo,sort_order AS sortOrder,created_at AS createdAt,updated_at AS updatedAt FROM committee_members WHERE section='board' ORDER BY sort_order, created_at").all(),
+    env.DB.prepare("SELECT id,name,designation,section,photo,sort_order AS sortOrder,created_at AS createdAt,updated_at AS updatedAt FROM committee_members WHERE section='board' ORDER BY sort_order, created_at").all(),
     env.DB.prepare("SELECT id,name,position,phone,bkash FROM collector_settings WHERE id='main' LIMIT 1").first()
   ]);
   return {members:members.results||[],cancelledMembers:cancelledMembers.results||[],payments:payments.results||[],fund:fund.results||[],orgFund:orgFund.results||[],rules:rules.results||[],committee:committee.results||[],collector:collector||{},month:monthNow(),share:SHARE,finePerShare:FINE,cutoff:CUTOFF,startMonth:START_MONTH,startDate:START_DATE};
@@ -159,7 +149,7 @@ async function route(req, env) {
   await ensureSeed(env);
   const url = new URL(req.url);
 
-  if (url.pathname === '/api/state' && req.method === 'GET') return json(await state(env, new URL(req.url).searchParams.get('lite')==='1'));
+  if (url.pathname === '/api/state' && req.method === 'GET') return json(await state(env));
   if (url.pathname === '/api/me' && req.method === 'GET') {
     const s = await session(req, env);
     if (!s) return json({authenticated:false});
@@ -268,124 +258,3 @@ async function route(req, env) {
     await env.DB.prepare('DELETE FROM committee_members WHERE id=?').bind(id).run();
     await audit(env,s.email,'delete','committee',id);
     return json({ok:true,id});
-  }
-
-  if (url.pathname === '/api/payments' && req.method === 'POST') {
-    const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
-    const b=await req.json().catch(()=>({}));
-    const amount=Number(b.amount);
-    if(!b.memberId||!/^\d{4}-\d{2}$/.test(b.month)||String(b.month)<START_MONTH||!Number.isFinite(amount)||amount<=0||!/^\d{4}-\d{2}-\d{2}$/.test(b.date)||String(b.date)<START_DATE) return json({error:'Invalid payment'},400);
-    const member=await env.DB.prepare('SELECT shares FROM members WHERE id=? AND active=1').bind(b.memberId).first();
-    if(!member) return json({error:'Member not found'},404);
-    const id=uid('p'),fundId=uid('f');
-    await env.DB.batch([
-      env.DB.prepare('INSERT INTO payments(id,member_id,month,amount,payment_date,notes) VALUES(?,?,?,?,?,?)').bind(id,b.memberId,b.month,amount,b.date,b.notes||''),
-      env.DB.prepare('INSERT INTO fund_transactions(id,tx_date,kind,amount,category,description,member_id,month,payment_id) VALUES(?,?,?,?,?,?,?,?,?)').bind(fundId,b.date,'income',amount,'Member Payment','Member Payment '+id,b.memberId,b.month,id)
-    ]);
-    await audit(env,s.email,'create','payment',id); return json({ok:true,id});
-  }
-  if (url.pathname.startsWith('/api/payments/') && req.method === 'PUT') {
-    const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
-    const id=url.pathname.split('/').pop();
-    const existing=await env.DB.prepare('SELECT id,member_id AS memberId,month,amount,payment_date AS date,notes FROM payments WHERE id=?').bind(id).first();
-    if(!existing) return json({error:'Payment not found'},404);
-    const b=await req.json().catch(()=>({}));
-    const month=String(b.month||existing.month), date=String(b.date||existing.date), amount=Number(b.amount);
-    if(!/^\d{4}-\d{2}$/.test(month)||month<START_MONTH||!/^\d{4}-\d{2}-\d{2}$/.test(date)||date<START_DATE||!Number.isFinite(amount)||amount<=0) return json({error:'Invalid payment'},400);
-    const notes=String(b.notes??existing.notes??'');
-    const fund=await env.DB.prepare('SELECT id FROM fund_transactions WHERE payment_id=? LIMIT 1').bind(id).first();
-    const legacy=fund?null:await env.DB.prepare("SELECT id FROM fund_transactions WHERE member_id=? AND month=? AND category='Member Payment' AND amount=? AND tx_date=? ORDER BY created_at DESC LIMIT 1").bind(existing.memberId,existing.month,existing.amount,existing.date).first();
-    try{
-      await env.DB.prepare('UPDATE payments SET month=?,amount=?,payment_date=?,notes=? WHERE id=?').bind(month,amount,date,notes,id).run();
-      if(fund){
-        await env.DB.prepare("UPDATE fund_transactions SET tx_date=?,amount=?,member_id=?,month=?,description=? WHERE id=?").bind(date,amount,existing.memberId,month,'Member Payment '+id,fund.id).run();
-      }else if(legacy){
-        await env.DB.prepare("UPDATE fund_transactions SET tx_date=?,amount=?,member_id=?,month=?,description=?,payment_id=? WHERE id=?").bind(date,amount,existing.memberId,month,'Member Payment '+id,id,legacy.id).run();
-      }else{
-        await env.DB.prepare('INSERT INTO fund_transactions(id,tx_date,kind,amount,category,description,member_id,month,payment_id) VALUES(?,?,?,?,?,?,?,?,?)').bind(uid('f'),date,'income',amount,'Member Payment','Member Payment '+id,existing.memberId,month,id).run();
-      }
-    }catch(e){ return json({error:'Payment update failed: '+String(e?.message||e)},500); }
-    await audit(env,s.email,'update','payment',id); return json({ok:true,id});
-  }
-  if (url.pathname.startsWith('/api/payments/') && req.method === 'DELETE') {
-    const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
-    const id=url.pathname.split('/').pop();
-    const existing=await env.DB.prepare('SELECT id,member_id AS memberId,month,amount,payment_date AS date FROM payments WHERE id=?').bind(id).first();
-    if(!existing) return json({error:'Payment not found'},404);
-    const fund=await env.DB.prepare('SELECT id FROM fund_transactions WHERE payment_id=? LIMIT 1').bind(id).first();
-    const legacy=fund?null:await env.DB.prepare("SELECT id FROM fund_transactions WHERE member_id=? AND month=? AND category='Member Payment' AND amount=? AND tx_date=? ORDER BY created_at DESC LIMIT 1").bind(existing.memberId,existing.month,existing.amount,existing.date).first();
-    try{
-      if(fund) await env.DB.prepare('DELETE FROM fund_transactions WHERE id=?').bind(fund.id).run();
-      else if(legacy) await env.DB.prepare('DELETE FROM fund_transactions WHERE id=?').bind(legacy.id).run();
-      await env.DB.prepare('DELETE FROM payments WHERE id=?').bind(id).run();
-    }catch(e){ return json({error:'Payment delete failed: '+String(e?.message||e)},500); }
-    await audit(env,s.email,'delete','payment',id); return json({ok:true,id});
-  }
-  if (url.pathname === '/api/collector' && req.method === 'POST') {
-    const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
-    const b=await req.json().catch(()=>({}));
-    const name=String(b.name||'').trim(), position=String(b.position||'').trim(), phone=String(b.phone||'').trim(), bkash=String(b.bkash||'').trim();
-    await env.DB.prepare("INSERT INTO collector_settings(id,name,position,phone,bkash,updated_at) VALUES('main',?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET name=excluded.name,position=excluded.position,phone=excluded.phone,bkash=excluded.bkash,updated_at=CURRENT_TIMESTAMP").bind(name,position,phone,bkash).run();
-    await audit(env,s.email,'update','collector','main'); return json({ok:true});
-  }
-  if (url.pathname === '/api/rules' && req.method === 'POST') {
-    const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
-    const b=await req.json().catch(()=>({})); const id=b.id||uid('rule');
-    const title=String(b.title||'').trim(), body=String(b.body||'').trim();
-    if(!title||!body) return json({error:'Rule title and body are required'},400);
-    if(b.id) await env.DB.prepare('UPDATE rules SET title=?,body=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(title,body,id).run();
-    else await env.DB.prepare('INSERT INTO rules(id,title,body) VALUES(?,?,?)').bind(id,title,body).run();
-    await audit(env,s.email,b.id?'update':'create','rule',id); return json({ok:true,id});
-  }
-  if (url.pathname.startsWith('/api/rules/') && req.method === 'DELETE') {
-    const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
-    const id=url.pathname.split('/').pop();
-    await env.DB.prepare('DELETE FROM rules WHERE id=?').bind(id).run();
-    await audit(env,s.email,'delete','rule',id); return json({ok:true});
-  }
-  if (url.pathname === '/api/fund' && req.method === 'POST') {
-    const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
-    const b=await req.json().catch(()=>({})); const amount=Number(b.amount);
-    if(!/^\d{4}-\d{2}-\d{2}$/.test(b.date)||String(b.date)<START_DATE||!Number.isFinite(amount)||amount<=0||!['income','investment','expense'].includes(b.kind)) return json({error:'Invalid fund transaction'},400);
-    const id=uid('f'); await env.DB.prepare('INSERT INTO fund_transactions(id,tx_date,kind,amount,category,description,member_id,month) VALUES(?,?,?,?,?,?,?,?)').bind(id,b.date,b.kind,amount,b.category||'',b.description||'',b.memberId||null,b.month||null).run();
-    await audit(env,s.email,'create','fund',id); return json({ok:true,id});
-  }
-  if (url.pathname.startsWith('/api/fund/') && req.method === 'DELETE') {
-    const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401); const id=url.pathname.split('/').pop();
-    await env.DB.prepare('DELETE FROM fund_transactions WHERE id=?').bind(id).run(); await audit(env,s.email,'delete','fund',id); return json({ok:true});
-  }
-  if (url.pathname === '/api/org-fund' && req.method === 'POST') {
-    const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
-    const b=await req.json().catch(()=>({})); const amount=Number(b.amount);
-    const categories=['যাকাত','ফিতরা','স্বেচ্ছা দান','জরিমানা','অন্যান্য'];
-    const donorName=String(b.donorName||'').trim();
-    if(!/^\d{4}-\d{2}-\d{2}$/.test(b.date)||String(b.date)<START_DATE||!Number.isFinite(amount)||amount<=0||!['income','expense'].includes(b.kind)||!categories.includes(String(b.category||''))) return json({error:'Invalid organizational fund transaction'},400);
-    if(b.kind==='income' && !donorName) return json({error:'জমাদাতার নাম দিন।'},400);
-    const id=uid('of');
-    await env.DB.prepare('INSERT INTO organizational_fund_transactions(id,tx_date,kind,category,amount,donor_name,description,member_id,month) VALUES(?,?,?,?,?,?,?,?,?)').bind(id,b.date,b.kind,String(b.category),amount,donorName,String(b.description||'').trim(),b.memberId||'',b.month||'').run();
-    await audit(env,s.email,'create','organizational_fund',id); return json({ok:true,id});
-  }
-  if (url.pathname.startsWith('/api/org-fund/') && req.method === 'PUT') {
-    const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
-    const id=url.pathname.split('/').pop(), b=await req.json().catch(()=>({}));
-    const amount=Number(b.amount), date=String(b.date||''), description=String(b.description||'').trim();
-    if(!Number.isFinite(amount)||amount<=0||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)||date<START_DATE) return json({error:'Invalid organizational fund transaction'},400);
-    if(id.startsWith('legacy-fine-')) { const legacyId=id.slice('legacy-fine-'.length); const old=await env.DB.prepare("SELECT id FROM fund_transactions WHERE id=? AND kind='income' AND category='জরিমানা'").bind(legacyId).first(); if(!old) return json({error:'Fine record not found'},404); await env.DB.prepare('UPDATE fund_transactions SET tx_date=?,amount=?,description=? WHERE id=?').bind(date,amount,description,legacyId).run(); }
-    else { const old=await env.DB.prepare('SELECT id FROM organizational_fund_transactions WHERE id=?').bind(id).first(); if(!old) return json({error:'Organizational fund record not found'},404); await env.DB.prepare('UPDATE organizational_fund_transactions SET tx_date=?,amount=?,description=? WHERE id=?').bind(date,amount,description,id).run(); }
-    await audit(env,s.email,'update','organizational_fund',id); return json({ok:true,id});
-  }
-  if (url.pathname.startsWith('/api/org-fund/') && req.method === 'DELETE') {
-    const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401); const id=url.pathname.split('/').pop();
-    if(id.startsWith('legacy-fine-')) await env.DB.prepare("DELETE FROM fund_transactions WHERE id=? AND kind='income' AND category='জরিমানা'").bind(id.slice('legacy-fine-'.length)).run();
-    else await env.DB.prepare('DELETE FROM organizational_fund_transactions WHERE id=?').bind(id).run();
-    await audit(env,s.email,'delete','organizational_fund',id); return json({ok:true});
-  }
-
-  return json({error:'Not found'},404);
-}
-
-export default { async fetch(req,env,ctx) {
-  const url=new URL(req.url);
-  if(url.pathname.startsWith('/api/')) { try { return await route(req,env); } catch(e) { return json({error:'Server error',detail:String(e?.message||e)},500); } }
-  return env.ASSETS.fetch(req);
-}};
