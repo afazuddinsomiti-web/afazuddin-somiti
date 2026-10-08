@@ -135,7 +135,7 @@ async function state(env) {
     env.DB.prepare('SELECT id,member_no AS no,name,position,phone,shares,profile_photo AS photo,join_date AS joinDate,updated_at AS cancelledAt FROM members WHERE active=0 ORDER BY member_no').all(),
     env.DB.prepare('SELECT id,member_id AS memberId,month,amount,payment_date AS date,notes FROM payments WHERE month>=? ORDER BY payment_date DESC').bind(START_MONTH).all(),
     env.DB.prepare("SELECT id,tx_date AS date,kind,amount,category,description,member_id AS memberId,month FROM fund_transactions WHERE tx_date>=? ORDER BY tx_date DESC").bind(START_DATE).all(),
-    env.DB.prepare("SELECT id,tx_date AS date,kind,category,amount,donor_name AS donorName,description FROM organizational_fund_transactions WHERE tx_date>=? ORDER BY tx_date DESC").bind(START_DATE).all(),
+    env.DB.prepare("SELECT id,tx_date AS date,kind,category,amount,donor_name AS donorName,description FROM organizational_fund_transactions WHERE tx_date>=? UNION ALL SELECT 'legacy-fine-'||id AS id,tx_date AS date,kind,category,amount,'Member' AS donorName,description FROM fund_transactions WHERE tx_date>=? AND kind='income' AND category='জরিমানা' ORDER BY date DESC").bind(START_DATE,START_DATE).all(),
     env.DB.prepare("SELECT id,title,body,created_at AS createdAt,updated_at AS updatedAt FROM rules ORDER BY created_at DESC").all(),
     env.DB.prepare("SELECT id,name,designation,section,photo,sort_order AS sortOrder,created_at AS createdAt,updated_at AS updatedAt FROM committee_members WHERE section='board' ORDER BY sort_order, created_at").all(),
     env.DB.prepare("SELECT id,name,position,phone,bkash FROM collector_settings WHERE id='main' LIMIT 1").first()
