@@ -54,7 +54,7 @@ async function ensureSchema(env) {
     env.DB.prepare("CREATE TABLE IF NOT EXISTS rules (id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS members (id TEXT PRIMARY KEY, member_no INTEGER NOT NULL UNIQUE, name TEXT NOT NULL, position TEXT DEFAULT '', phone TEXT DEFAULT '', shares INTEGER NOT NULL CHECK (shares >= 0 AND shares <= 10), profile_photo TEXT DEFAULT '', join_date TEXT DEFAULT '', active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS payments (id TEXT PRIMARY KEY, member_id TEXT NOT NULL, month TEXT NOT NULL, amount REAL NOT NULL, payment_date TEXT NOT NULL, notes TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(member_id) REFERENCES members(id) ON DELETE CASCADE)"),
-    env.DB.prepare("CREATE TABLE IF NOT EXISTS fund_transactions (id TEXT PRIMARY KEY, tx_date TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('income','investment','expense')), amount REAL NOT NULL, category TEXT DEFAULT '', description TEXT DEFAULT '', member_id TEXT, month TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(member_id) REFERENCES members(id) ON DELETE SET NULL)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS fund_transactions (id TEXT PRIMARY KEY, tx_date TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('income','investment','expense')), amount REAL NOT NULL, category TEXT DEFAULT '', description TEXT DEFAULT '', member_id TEXT, month TEXT, payment_id TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(member_id) REFERENCES members(id) ON DELETE SET NULL)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS admins (email TEXT PRIMARY KEY, password_hash TEXT NOT NULL, must_change_password INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, email TEXT NOT NULL, expires_at INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS audit_log (id TEXT PRIMARY KEY, email TEXT NOT NULL, action TEXT NOT NULL, entity TEXT DEFAULT '', entity_id TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
@@ -67,6 +67,10 @@ async function ensureSchema(env) {
   const orgCols = await env.DB.prepare("PRAGMA table_info(organizational_fund_transactions)").all();
   if (!(orgCols.results || []).some(c => c.name === 'donor_name')) {
     await env.DB.prepare("ALTER TABLE organizational_fund_transactions ADD COLUMN donor_name TEXT DEFAULT ''").run();
+  }
+  const fundCols = await env.DB.prepare("PRAGMA table_info(fund_transactions)").all();
+  if (!(fundCols.results || []).some(c => c.name === 'payment_id')) {
+    await env.DB.prepare("ALTER TABLE fund_transactions ADD COLUMN payment_id TEXT DEFAULT ''").run();
   }
 }
 
@@ -93,7 +97,7 @@ async function ensureSeed(env) {
   // unwanted members and can overwrite the user's intended numbering.
   const memberCount = await env.DB.prepare('SELECT COUNT(*) AS c FROM members').first();
   if (Number(memberCount?.c || 0) === 0) {
-    const shares = [5,6,10];
+    const shares = [0];
     const stmt = env.DB.prepare('INSERT INTO members(id,member_no,name,position,phone,shares,profile_photo,join_date) VALUES(?,?,?,?,?,?,?,?)');
     const batch = [];
     for (let i=1;i<=50;i++) batch.push(stmt.bind(uid('m'),i,`সদস্য ${String(i).padStart(2,'0')}`,'','',shares[(i-1)%3],'',''));
@@ -132,7 +136,7 @@ async function state(env) {
     env.DB.prepare("SELECT id,tx_date AS date,kind,amount,category,description,member_id AS memberId,month FROM fund_transactions WHERE tx_date>=? ORDER BY tx_date DESC").bind(START_DATE).all(),
     env.DB.prepare("SELECT id,tx_date AS date,kind,category,amount,donor_name AS donorName,description FROM organizational_fund_transactions WHERE tx_date>=? ORDER BY tx_date DESC").bind(START_DATE).all(),
     env.DB.prepare("SELECT id,title,body,created_at AS createdAt,updated_at AS updatedAt FROM rules ORDER BY created_at DESC").all(),
-    env.DB.prepare("SELECT id,name,designation,section,photo,sort_order AS sortOrder,created_at AS createdAt,updated_at AS updatedAt FROM committee_members ORDER BY CASE section WHEN 'board' THEN 1 WHEN 'executive' THEN 2 WHEN 'advisory' THEN 3 ELSE 4 END, sort_order, created_at").all()
+    env.DB.prepare("SELECT id,name,designation,section,photo,sort_order AS sortOrder,created_at AS createdAt,updated_at AS updatedAt FROM committee_members WHERE section='board' ORDER BY sort_order, created_at").all()
   ]);
   return {members:members.results||[],cancelledMembers:cancelledMembers.results||[],payments:payments.results||[],fund:fund.results||[],orgFund:orgFund.results||[],rules:rules.results||[],committee:committee.results||[],month:monthNow(),share:SHARE,finePerShare:FINE,cutoff:CUTOFF,startMonth:START_MONTH,startDate:START_DATE};
 }
@@ -232,7 +236,7 @@ async function route(req, env) {
     const section=String(b.section||'').trim();
     const photo=typeof b.photo==='string'?b.photo:'';
     const sortOrder=Number.isInteger(Number(b.sortOrder)) ? Number(b.sortOrder) : 0;
-    if(!name||!designation||!['board','executive','advisory'].includes(section)) return json({error:'Invalid committee member data'},400);
+    if(!name||!designation||section!=='board') return json({error:'Invalid committee member data'},400);
     if(photo.length>120000) return json({error:'Committee photo is too large. Please choose a smaller image.'},400);
     if(b.id) {
       const existing=await env.DB.prepare('SELECT id FROM committee_members WHERE id=?').bind(id).first();
@@ -261,10 +265,42 @@ async function route(req, env) {
     if(!b.memberId||!/^\d{4}-\d{2}$/.test(b.month)||String(b.month)<START_MONTH||!Number.isFinite(amount)||amount<=0||!/^\d{4}-\d{2}-\d{2}$/.test(b.date)||String(b.date)<START_DATE) return json({error:'Invalid payment'},400);
     const member=await env.DB.prepare('SELECT shares FROM members WHERE id=? AND active=1').bind(b.memberId).first();
     if(!member) return json({error:'Member not found'},404);
-    const id=uid('p');
-    await env.DB.prepare('INSERT INTO payments(id,member_id,month,amount,payment_date,notes) VALUES(?,?,?,?,?,?)').bind(id,b.memberId,b.month,amount,b.date,b.notes||'').run();
-    await env.DB.prepare('INSERT INTO fund_transactions(id,tx_date,kind,amount,category,description,member_id,month) VALUES(?,?,?,?,?,?,?,?)').bind(uid('f'),b.date,'income',amount,'Member Payment','Member contribution',b.memberId,b.month).run();
+    const id=uid('p'),fundId=uid('f');
+    await env.DB.batch([
+      env.DB.prepare('INSERT INTO payments(id,member_id,month,amount,payment_date,notes) VALUES(?,?,?,?,?,?)').bind(id,b.memberId,b.month,amount,b.date,b.notes||''),
+      env.DB.prepare('INSERT INTO fund_transactions(id,tx_date,kind,amount,category,description,member_id,month,payment_id) VALUES(?,?,?,?,?,?,?,?,?)').bind(fundId,b.date,'income',amount,'Member Payment','Member Payment '+id,b.memberId,b.month,id)
+    ]);
     await audit(env,s.email,'create','payment',id); return json({ok:true,id});
+  }
+  if (url.pathname.startsWith('/api/payments/') && req.method === 'PUT') {
+    const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
+    const id=url.pathname.split('/').pop();
+    const existing=await env.DB.prepare('SELECT id,member_id AS memberId,month,amount,payment_date AS date,notes FROM payments WHERE id=?').bind(id).first();
+    if(!existing) return json({error:'Payment not found'},404);
+    const b=await req.json().catch(()=>({}));
+    const month=String(b.month||existing.month), date=String(b.date||existing.date), amount=Number(b.amount);
+    if(!/^\d{4}-\d{2}$/.test(month)||month<START_MONTH||!/^\d{4}-\d{2}-\d{2}$/.test(date)||date<START_DATE||!Number.isFinite(amount)||amount<=0) return json({error:'Invalid payment'},400);
+    const fund=await env.DB.prepare('SELECT id FROM fund_transactions WHERE payment_id=? LIMIT 1').bind(id).first();
+    if(fund){
+      await env.DB.batch([
+        env.DB.prepare('UPDATE payments SET month=?,amount=?,payment_date=?,notes=? WHERE id=?').bind(month,amount,date,String(b.notes??existing.notes??''),id),
+        env.DB.prepare("UPDATE fund_transactions SET tx_date=?,amount=?,member_id=?,month=?,description=? WHERE id=?").bind(date,amount,existing.memberId,month,'Member Payment '+id,fund.id)
+      ]);
+    }else{
+      const legacy=await env.DB.prepare("SELECT id FROM fund_transactions WHERE member_id=? AND month=? AND category='Member Payment' AND amount=? AND tx_date=? ORDER BY created_at DESC LIMIT 1").bind(existing.memberId,existing.month,existing.amount,existing.date).first();
+      if(legacy){
+        await env.DB.batch([
+          env.DB.prepare('UPDATE payments SET month=?,amount=?,payment_date=?,notes=? WHERE id=?').bind(month,amount,date,String(b.notes??existing.notes??''),id),
+          env.DB.prepare("UPDATE fund_transactions SET tx_date=?,amount=?,member_id=?,month=?,description=?,payment_id=? WHERE id=?").bind(date,amount,existing.memberId,month,'Member Payment '+id,id,legacy.id)
+        ]);
+      }else{
+        await env.DB.batch([
+          env.DB.prepare('UPDATE payments SET month=?,amount=?,payment_date=?,notes=? WHERE id=?').bind(month,amount,date,String(b.notes??existing.notes??''),id),
+          env.DB.prepare('INSERT INTO fund_transactions(id,tx_date,kind,amount,category,description,member_id,month,payment_id) VALUES(?,?,?,?,?,?,?,?,?)').bind(uid('f'),date,'income',amount,'Member Payment','Member Payment '+id,existing.memberId,month,id)
+        ]);
+      }
+    }
+    await audit(env,s.email,'update','payment',id); return json({ok:true,id});
   }
   if (url.pathname === '/api/rules' && req.method === 'POST') {
     const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
