@@ -1,9 +1,13 @@
-এই আপডেটে শুধুমাত্র অনুরোধ করা সংশোধন করা হয়েছে:
-- মোবাইলে কমিটি Edit/Delete button ছোট ও thumb-friendly করা
-- Member/Committee photo upload-এ mobile-safe FileReader + Canvas fallback, ছোট JPEG payload এবং save-before-preview protection
-- Dashboard-এর Committee/Organization Fund/Reports icon একই inline SVG-তে আনা; icon double হওয়ার সমস্যা দূর
-- Dashboard-এর ৪টি colorful action box-এ icon-এর পাশে নাম দেখানো
-- Dashboard-এ বর্তমান মাস, গত ৩ মাস এবং অক্টোবর ২০২৫ থেকে বর্তমান পর্যন্ত payment summary পুনঃস্থাপন
-- সব হিসাবের accounting start point ২০২৫-১০-০১; এর আগের payment/fund/org-fund records calculation/API display থেকে বাদ
-- ২০২৫-১০-০১-এর আগের নতুন accounting entry server-side block করা
-- Existing D1 migrations, member IDs, payment IDs ও stored data delete/alter করা হয়নি।
+Afazuddin Somiti — সীমিত নিরাপদ আপডেট
+
+এই প্যাকেজে:
+1. সদস্যের মাসিক জরিমানা হিসাব fund এবং organizational fund—দুই জায়গা থেকেই নেয়; legacy-fine রেকর্ড দ্বিতীয়বার গণনা হয় না।
+2. টাকা সংগ্রহকারীর ছবি আপলোড/সংরক্ষণের সুবিধা যোগ করা হয়েছে। পুরোনো ডাটাবেসে photo কলাম না থাকলে অ্যাপ নিজে additive কলাম যোগ করবে; পুরোনো তথ্য মুছে ফেলা হয় না।
+3. সংগ্রহকারীর পাবলিক বক্সে শুধু মোবাইল ও বিকাশ নম্বর দেখায়; নাম অভ্যন্তরীণভাবে জরিমানার donor name হিসেবে রাখা হয়।
+4. সদস্যের ছবি বড় করা এবং সদস্য-বিস্তারিত সারাংশ মোবাইলে ২ কলামে দেখানোর ব্যবস্থা।
+
+নিরাপত্তা:
+- migrations/0001–0004 অপরিবর্তিত।
+- কোনো লাইভ deploy করা হয়নি।
+- কোনো লাইভ ডাটাবেসে সংযোগ বা ডেটা পরিবর্তন করা হয়নি।
+- deploy করার আগে বর্তমান ডাটাবেসের ব্যাকআপ নিন এবং staging/local পরিবেশে পরীক্ষা করুন।

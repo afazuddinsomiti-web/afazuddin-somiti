@@ -59,12 +59,14 @@ async function ensureSchema(env) {
     env.DB.prepare("CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, email TEXT NOT NULL, expires_at INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS audit_log (id TEXT PRIMARY KEY, email TEXT NOT NULL, action TEXT NOT NULL, entity TEXT DEFAULT '', entity_id TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS organizational_fund_transactions (id TEXT PRIMARY KEY, tx_date TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('income','expense')), category TEXT NOT NULL, amount REAL NOT NULL, donor_name TEXT DEFAULT '', description TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
-    env.DB.prepare("CREATE TABLE IF NOT EXISTS collector_settings (id TEXT PRIMARY KEY, name TEXT DEFAULT '', position TEXT DEFAULT '', phone TEXT DEFAULT '', bkash TEXT DEFAULT '', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS collector_settings (id TEXT PRIMARY KEY, name TEXT DEFAULT '', position TEXT DEFAULT '', phone TEXT DEFAULT '', bkash TEXT DEFAULT '', photo TEXT DEFAULT '', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_payments_member_month ON payments(member_id, month)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_fund_date ON fund_transactions(tx_date)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_org_fund_date ON organizational_fund_transactions(tx_date)")
   ]);
+  const collectorCols = await env.DB.prepare("PRAGMA table_info(collector_settings)").all();
+  if (!(collectorCols.results || []).some(c => c.name === 'photo')) await env.DB.prepare("ALTER TABLE collector_settings ADD COLUMN photo TEXT DEFAULT ''").run();
   const orgCols = await env.DB.prepare("PRAGMA table_info(organizational_fund_transactions)").all();
   if (!(orgCols.results || []).some(c => c.name === 'donor_name')) {
     await env.DB.prepare("ALTER TABLE organizational_fund_transactions ADD COLUMN donor_name TEXT DEFAULT ''").run();
@@ -148,7 +150,7 @@ async function state(env, lite=false) {
     env.DB.prepare("SELECT id,tx_date AS date,kind,category,amount,donor_name AS donorName,description,member_id AS memberId,month FROM organizational_fund_transactions WHERE tx_date>=? UNION ALL SELECT 'legacy-fine-'||id AS id,tx_date AS date,kind,category,amount,'Member' AS donorName,description,member_id AS memberId,month FROM fund_transactions WHERE tx_date>=? AND kind='income' AND category='জরিমানা' ORDER BY date DESC").bind(START_DATE,START_DATE).all(),
     env.DB.prepare("SELECT id,title,body,created_at AS createdAt,updated_at AS updatedAt FROM rules ORDER BY created_at DESC").all(),
     env.DB.prepare(lite ? "SELECT id,name,designation,section,'' AS photo,sort_order AS sortOrder,created_at AS createdAt,updated_at AS updatedAt FROM committee_members WHERE section='board' ORDER BY sort_order, created_at" : "SELECT id,name,designation,section,photo,sort_order AS sortOrder,created_at AS createdAt,updated_at AS updatedAt FROM committee_members WHERE section='board' ORDER BY sort_order, created_at").all(),
-    env.DB.prepare("SELECT id,name,position,phone,bkash FROM collector_settings WHERE id='main' LIMIT 1").first()
+    env.DB.prepare("SELECT id,name,position,phone,bkash,photo FROM collector_settings WHERE id='main' LIMIT 1").first()
   ]);
   return {members:members.results||[],cancelledMembers:cancelledMembers.results||[],payments:payments.results||[],fund:fund.results||[],orgFund:orgFund.results||[],rules:rules.results||[],committee:committee.results||[],collector:collector||{},month:monthNow(),share:SHARE,finePerShare:FINE,cutoff:CUTOFF,startMonth:START_MONTH,startDate:START_DATE};
 }
@@ -324,8 +326,9 @@ async function route(req, env) {
   if (url.pathname === '/api/collector' && req.method === 'POST') {
     const s=await requireAdmin(req,env); if(!s) return json({error:'Unauthorized'},401);
     const b=await req.json().catch(()=>({}));
-    const name=String(b.name||'').trim(), position=String(b.position||'').trim(), phone=String(b.phone||'').trim(), bkash=String(b.bkash||'').trim();
-    await env.DB.prepare("INSERT INTO collector_settings(id,name,position,phone,bkash,updated_at) VALUES('main',?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET name=excluded.name,position=excluded.position,phone=excluded.phone,bkash=excluded.bkash,updated_at=CURRENT_TIMESTAMP").bind(name,position,phone,bkash).run();
+    const name=String(b.name||'').trim(), position=String(b.position||'').trim(), phone=String(b.phone||'').trim(), bkash=String(b.bkash||'').trim(), photo=String(b.photo||'');
+    if (photo.length > 120000 || (photo && !photo.startsWith('data:image/'))) return json({error:'ছবিটি সঠিক নয় বা বেশি বড়। ছোট ছবি দিন।'},400);
+    await env.DB.prepare("INSERT INTO collector_settings(id,name,position,phone,bkash,photo,updated_at) VALUES('main',?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET name=excluded.name,position=excluded.position,phone=excluded.phone,bkash=excluded.bkash,photo=excluded.photo,updated_at=CURRENT_TIMESTAMP").bind(name,position,phone,bkash,photo).run();
     await audit(env,s.email,'update','collector','main'); return json({ok:true});
   }
   if (url.pathname === '/api/rules' && req.method === 'POST') {

@@ -1,0 +1,8 @@
+বাংলা নির্দেশনা — আপলোডের জন্য প্রস্তুত
+
+১) এই ZIP কম্পিউটারে Extract করুন।
+২) Extract করা afazuddin-somiti ফোল্ডারের ভেতরের ফাইলগুলো আপনার GitHub repository-র root-এ upload/replace করুন।
+৩) ZIP ফাইলটি নিজে GitHub-এ upload করবেন না।
+৪) Cloudflare Pages/Workers build সফল হলে ওয়েবসাইটে ছবি নির্বাচন করে Save দিন, তারপর refresh করে পরীক্ষা করুন।
+
+সতর্কতা: D1 database মুছবেন না এবং migrations পুনরায় চালিয়ে ডেটা reset করবেন না।
